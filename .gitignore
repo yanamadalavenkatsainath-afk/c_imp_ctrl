@@ -1,0 +1,21 @@
+# Compiled outputs
+gnc_lib.dll
+gnc_lib.so
+gnc_lib.dylib
+*.exe
+*.o
+*.obj
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# VS Code
+.vscode/settings.json
+.vscode/launch.json
+
+# Keep:
+# .vscode/c_cpp_properties.json  (IntelliSense config)
+!.vscode/c_cpp_properties.json
