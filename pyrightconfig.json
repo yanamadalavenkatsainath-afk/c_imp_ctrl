@@ -1,0 +1,15 @@
+{
+    "pythonVersion": "3.11",
+    "pythonPlatform": "Windows",
+    "extraPaths": [
+        "C:/Users/Venkat/OneDrive/Desktop/appex/flight sim",
+        "C:/Users/Venkat/OneDrive/Desktop/appex/Satellite_GNC",
+        "C:/Users/Venkat/OneDrive/Desktop/appex/Satellite_GNC/sim_python"
+    ],
+    "exclude": [
+        "**/node_modules",
+        "**/__pycache__"
+    ],
+    "reportMissingImports": "warning",
+    "reportMissingModuleSource": "none"
+}

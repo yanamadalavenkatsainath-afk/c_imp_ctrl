@@ -13,7 +13,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
-#include "../src_c/rpod_ctrl.h"
+#include "rpod_ctrl.h"
 
 #define CHECK(cond, msg) \
     do { printf("  %s — %s\n", (cond) ? "✓ PASS" : "✗ FAIL", msg); \
@@ -67,35 +67,34 @@ static void test_prox_speed_profile(void) {
 }
 
 
-/* ── Test 2: PROX_OPS — correct speed at 50m ───────────────────
-   At range exactly 50m the profile threshold 50m gives v=30mm/s.
-   Accel should be non-saturating (vel_err small enough).         */
-static void test_prox_speed_50m(void) {
-    printf("\nTest 2: PROX_OPS closing speed at 50m\n");
+    /* ── Test 2: PROX_OPS — correct speed at 50m ───────────────────
+       sqrt law: v_close = K_SQRT * sqrt(50) ≈ 0.06325 m/s
+       accel = -v_close / TAU = -0.06325/5 = -0.01265 m/s²          */
+    static void test_prox_speed_50m(void) {
+        printf("\nTest 2: PROX_OPS closing speed at 50m (sqrt law)\n");
 
-    double n_chief   = 7.292e-5;
-    double accel_max = 0.020;
+        double n_chief   = 7.292e-5;
+        double accel_max = 0.020;
 
-    /* Deputy at 50m radially above chief */
-    RPOD_State state;
-    state.pos[0] = 50.0;   /* radial */
-    state.pos[1] = 0.0;
-    state.pos[2] = 0.0;
-    state.vel[0] = 0.0;
-    state.vel[1] = 0.0;
-    state.vel[2] = 0.0;
+        RPOD_State state;
+        state.pos[0] = 50.0;   /* radial */
+        state.pos[1] = 0.0;
+        state.pos[2] = 0.0;
+        state.vel[0] = 0.0;
+        state.vel[1] = 0.0;
+        state.vel[2] = 0.0;
 
-    double accel[3];
-    RPOD_prox_ops(&state, 50.0, n_chief, accel_max, accel);
+        double accel[3];
+        RPOD_prox_ops(&state, 50.0, n_chief, accel_max, accel);
 
-    /* pos_hat = [1,0,0], vel_des = [-0.030, 0, 0]
-       vel_err = [0.030, 0, 0]
-       accel   = [-0.006, 0, 0] (not saturated) */
-    double expected_ax = -0.030 / RPOD_PROX_TAU;   /* -0.006 */
-    CHECK(fabs(accel[0] - expected_ax) < 1e-4,
-          "accel_x = -v_close/TAU = -0.006 m/s² at 50m");
-    printf("  accel[0] = %.5f  expected %.5f\n", accel[0], expected_ax);
-}
+        /* sqrt law: K_SQRT*sqrt(50) = 0.06325, vel_des = [-0.06325,0,0]
+           vel_err = [0.06325,0,0], accel = -0.06325/TAU = -0.01265 m/s²
+           Not saturated (< accel_max=0.020) */
+        double expected_ax = -(RPOD_K_SQRT * sqrt(50.0)) / RPOD_PROX_TAU;
+        CHECK(fabs(accel[0] - expected_ax) < 1e-4,
+              "accel_x = -K_SQRT*sqrt(50)/TAU (sqrt law at 50m)");
+        printf("  accel[0] = %.5f  expected %.5f\n", accel[0], expected_ax);
+    }
 
 
 /* ── Test 3: PROX_OPS → TERMINAL handoff at 0.8m ───────────────
@@ -121,7 +120,7 @@ static void test_prox_terminal_handoff(void) {
     RPOD_prox_ops(&state, 0.5, n_chief, accel_max, accel_prox);
 
     /* Call TERMINAL directly for reference */
-    RPOD_terminal(&state, accel_max, accel_term);
+    RPOD_terminal_simple(&state, accel_max, accel_term);
 
     /* Both must give the same accel */
     double diff = fabs(accel_prox[0] - accel_term[0])
@@ -139,7 +138,7 @@ static void test_prox_terminal_handoff(void) {
    = 0.004 m/s (below VMAX=0.005).  Deputy must be commanded to
    close at 4mm/s.                                                */
 static void test_terminal_decel(void) {
-    printf("\nTest 4: TERMINAL range-proportional deceleration\n");
+    printf("\nTest 4: TERMINAL sqrt-law deceleration at 40cm\n");
 
     double accel_max = 0.020;
 
@@ -147,21 +146,23 @@ static void test_terminal_decel(void) {
     state.pos[0] = 0.4;   /* 40cm, purely radial */
     state.pos[1] = 0.0;
     state.pos[2] = 0.0;
-    /* Already closing at the desired speed — accel should be ~0 */
-    state.vel[0] = -RPOD_TERMINAL_K * 0.4;   /* -0.004 m/s */
+    /* Already closing at the sqrt-law desired speed:
+       v_des = K_SQRT_TERM * sqrt(0.4) = 0.055902 * 0.6325 = 0.03535 m/s
+       TAU at 0.4m < 0.3m → TAU_CLOSE = 5s → accel = (v_des - v_des)/5 = 0 */
+    double v_des = RPOD_K_SQRT_TERM * sqrt(0.4);
+    if (v_des > RPOD_V_TERM_MAX_MS) v_des = RPOD_V_TERM_MAX_MS;
+    state.vel[0] = -v_des;   /* closing radially at desired speed */
     state.vel[1] = 0.0;
     state.vel[2] = 0.0;
 
     double accel[3];
-    int ret = RPOD_terminal(&state, accel_max, accel);
+    int ret = RPOD_terminal_simple(&state, accel_max, accel);
 
-    /* vel_des = [-0.004, 0, 0].  vel = [-0.004, 0, 0].
-       accel = (vel_des - vel) / 5 = [0, 0, 0]. */
     CHECK(norm3(accel) < 1e-8,
           "accel ≈ 0 when already at desired closing speed");
     CHECK(ret == 0,
           "returns 0 (not docked) at 40cm");
-    printf("  |accel| = %.2e m/s²\n", norm3(accel));
+    printf("  v_des=%.5f m/s  |accel| = %.2e m/s²\n", v_des, norm3(accel));
 }
 
 
@@ -181,9 +182,9 @@ static void test_terminal_docking(void) {
     state.vel[2] = 0.0;
 
     double accel[3];
-    int ret = RPOD_terminal(&state, accel_max, accel);
+    int ret = RPOD_terminal_simple(&state, accel_max, accel);
 
-    CHECK(ret == 1, "TERMINAL returns 1 (docked) when range < 5cm");
+    CHECK(ret == 2, "TERMINAL returns 2 (docked) when range < 5cm");
     CHECK(norm3(accel) < 1e-9, "zero accel output when docked");
     printf("  ret = %d  |accel| = %.2e\n", ret, norm3(accel));
 }
@@ -230,7 +231,7 @@ static void test_terminal_vmax(void) {
     state.vel[2] = 0.0;
 
     double accel[3];
-    RPOD_terminal(&state, accel_max, accel);
+    RPOD_terminal_simple(&state, accel_max, accel);
 
     double vel_des_mag = RPOD_TERMINAL_K * 2.0;   /* would be 0.020 */
     CHECK(vel_des_mag > RPOD_TERMINAL_VMAX,

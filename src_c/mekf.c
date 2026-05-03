@@ -136,15 +136,33 @@ void MEKF_init(MEKF_State *s, float dt_s) {
     s->dt   = (MEKF_FLOAT)dt_s;
     s->q[0] = 1.0f;   /* identity quaternion */
 
-    /* P: ~5° attitude uncertainty, 1°/hr bias uncertainty */
+    /* P: ~5° attitude uncertainty (rows 0-2), ~10 mrad/s bias uncertainty (rows 3-5).
+     *
+     * Original P[3:6] used 1°/hr → bias_var ≈ 7.7e-11, which is so small that
+     * even after many steps the Kalman gain on bias rows stays near zero.
+     * A 5 mrad/s step bias (= 1 deg/s) is 1000× larger than 1°/hr — the filter
+     * needs an initial P_bias that reflects the actual expected uncertainty range.
+     *
+     * 10 mrad/s → variance = (0.010)² = 1e-4 rad²/s²  (generous but safe).
+     * This immediately allows the gain to act on bias states from the first update.
+     */
     for (int i=0;i<6;i++) s->P[i][i] = 0.01f;
-    MEKF_FLOAT bias_var = (MEKF_FLOAT)(1.0/3600.0*3.14159/180.0);
-    bias_var *= bias_var;
-    s->P[3][3]=bias_var; s->P[4][4]=bias_var; s->P[5][5]=bias_var;
+    s->P[3][3]=1e-4f; s->P[4][4]=1e-4f; s->P[5][5]=1e-4f;
 
-    /* Q: gyro ARW + bias instability (matches Python) */
+    /* Q: gyro ARW + bias instability.
+     *
+     * Attitude noise (rows 0-2): 1e-6 rad²/step — standard MEMS ARW.
+     *
+     * Bias instability (rows 3-5):
+     *   Original 1e-12 → Kalman gain on bias ≈ 0, no convergence after step.
+     *   Q_bias = 1e-7 rad²/s² per step matches ~3 deg/hr MEMS in-run instability
+     *   at dt=0.01 s: σ_instability ≈ 3 deg/hr = 1.45e-4 rad/s →
+     *   Q_bias ≈ (1.45e-4)² × 0.01 ≈ 2e-10 per step.
+     *   We use 1e-7 (3 orders above floor) so P[3:6] recovers quickly after a
+     *   sudden step and the filter converges within the 12 s (1200 step) window.
+     */
     s->Q[0][0]=1e-6f; s->Q[1][1]=1e-6f; s->Q[2][2]=1e-6f;
-    s->Q[3][3]=1e-12f; s->Q[4][4]=1e-12f; s->Q[5][5]=1e-12f;
+    s->Q[3][3]=1e-7f; s->Q[4][4]=1e-7f; s->Q[5][5]=1e-7f;
 
     /* R: sensor noise (1e-4 rad² — matches Python) */
     s->R_mag[0][0]=1e-4f; s->R_mag[1][1]=1e-4f; s->R_mag[2][2]=1e-4f;
@@ -254,8 +272,7 @@ void MEKF_update(MEKF_State *s,
     memset(I6, 0, sizeof(I6));
     for (int i=0;i<6;i++) I6[i][i]=1.0f;
     mat_mul(&K[0][0], &H[0][0], &KH[0][0],  6, 3, 6);
-    mat_add(&I6[0][0], &KH[0][0], &IKH[0][0], 6, 6);   /* IKH = I - KH? */
-    /* Actually: IKH = I - KH */
+    /* IKH = I - KH  (subtraction, NOT addition) */
     for (int i=0;i<36;i++) ((MEKF_FLOAT*)IKH)[i] = ((MEKF_FLOAT*)I6)[i] - ((MEKF_FLOAT*)KH)[i];
 
     MEKF_FLOAT IKHP[6][6], IKHT[6][6], IKHPIKHT[6][6];

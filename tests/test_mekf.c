@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
-#include "../src_c/mekf.h"
+#include "mekf.h"
 
 #define CHECK(cond, msg) printf("  %s — %s\n", (cond)?"✓ PASS":"✗ FAIL", msg)
 #define DEG2RAD(x) ((x)*3.14159265f/180.0f)
@@ -34,7 +34,7 @@ int main(void) {
     }
 
     /* ── Test 2: Update with perfect measurement → covariance reduces */
-    printf("\nTest 2: Update with truth measurement — innovation ~0\n");
+    printf("\nTest 2: Update with truth measurement — observable axes reduce\n");
     {
         MEKF_State s;
         MEKF_init(&s, 0.1f);
@@ -43,15 +43,20 @@ int main(void) {
         MEKF_FLOAT z_body[3]     = {1.0f, 0.0f, 0.0f};
 
         /* R << P so Kalman gain is large and P visibly reduces.
-           P=0.01, R=1e-6 → gain ≈ 1, P drops roughly in half. */
+           For z=[1,0,0] the skew H has H[0,:]=0 so P[0][0] is unobservable.
+           P[1][1] and P[2][2] are observable and must reduce. */
         MEKF_FLOAT R[3][3] = {{1e-6f,0,0},{0,1e-6f,0},{0,0,1e-6f}};
 
-        float p_before = s.P[0][0];
+        float p1_before = s.P[1][1];
+        float p2_before = s.P[2][2];
         MEKF_update(&s, z_body, v_inertial, R);
-        float p_after  = s.P[0][0];
+        float p1_after  = s.P[1][1];
+        float p2_after  = s.P[2][2];
 
-        printf("  P[0][0] before: %.6f   after: %.6f\n", p_before, p_after);
-        CHECK(p_after < p_before, "covariance reduced after update");
+        printf("  P[1][1] before: %.6f   after: %.2e\n", p1_before, p1_after);
+        printf("  P[2][2] before: %.6f   after: %.2e\n", p2_before, p2_after);
+        CHECK(p1_after < p1_before, "P[1][1] reduced (observable axis)");
+        CHECK(p2_after < p2_before, "P[2][2] reduced (observable axis)");
         CHECK(fabsf(s.q[0]-1.0f) < 1e-4f, "quaternion unchanged with zero innovation");
     }
 
