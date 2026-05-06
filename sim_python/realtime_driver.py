@@ -93,14 +93,19 @@ class NavState(ctypes.Structure):
 
 class AttState(ctypes.Structure):
     _fields_ = [
-        ("q_wxyz",   ctypes.c_double * 4),
-        ("bias_xyz", ctypes.c_double * 3),
+        ("q_wxyz",           ctypes.c_double * 4),
+        ("bias_xyz",         ctypes.c_double * 3),
+        ("quest_quality",    ctypes.c_double),
+        ("pointing_err_deg", ctypes.c_double),
     ]
 
 class GuidanceCmd(ctypes.Structure):
     _fields_ = [
-        ("accel_lvlh",    ctypes.c_double * 3),
-        ("guidance_mode", ctypes.c_int32),
+        ("accel_lvlh",  ctypes.c_double * 3),
+        ("torque_rw",   ctypes.c_double * 3),
+        ("dipole_mtq",  ctypes.c_double * 3),
+        ("fsw_mode",    ctypes.c_int32),
+        ("rpod_mode",   ctypes.c_int32),
     ]
 
 class TimingTelemetry(ctypes.Structure):
@@ -131,7 +136,7 @@ class TelRow:
     vel_lvlh:      np.ndarray
     pos_std:       np.ndarray
     accel_cmd:     np.ndarray
-    guidance_mode: int
+    fsw_mode: int
     loop_time_ms:  float
     ekf_updated:   bool
     range_valid:   bool
@@ -422,7 +427,7 @@ def run_sil(n_ticks: int = 3600,
                 vel_lvlh      = np.array(list(cf.nav.vel_lvlh)),
                 pos_std       = np.array(list(cf.nav.pos_std)),
                 accel_cmd     = last_accel.copy(),
-                guidance_mode = cf.cmd.guidance_mode,
+                fsw_mode = cf.cmd.fsw_mode,
                 loop_time_ms  = cf.timing.loop_time_ms,
                 ekf_updated   = bool(cf.ekf_updated),
                 range_valid   = bool(sf_py.range.valid),
@@ -442,7 +447,7 @@ def run_sil(n_ticks: int = 3600,
         print(f"  Missed   : {cf.timing.missed_deadlines} deadlines")
         print(f"  EKF pos  : {list(np.round(cf.nav.pos_lvlh, 2))} m")
         print(f"  Accel    : {list(np.round(cf.cmd.accel_lvlh, 5))} m/s²")
-        mode = FlightLoopDLL.GUIDANCE_MODES.get(cf.cmd.guidance_mode, "?")
+        mode = FlightLoopDLL.GUIDANCE_MODES.get(cf.cmd.fsw_mode, "?")
         print(f"  Mode     : {mode}")
 
     return log
