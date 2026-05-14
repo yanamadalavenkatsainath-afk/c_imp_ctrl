@@ -113,11 +113,6 @@ int RPOD_terminal(const RPOD_TermState *state,
     double com_range = vec3_norm(pos);
 
     /* ── Docking complete ─────────────────────────────────────── */
-    if (com_range < RPOD_DOCK_DONE_M) {
-        accel_out[0] = accel_out[1] = accel_out[2] = 0.0;
-        return 2;
-    }
-
     /* ── TAU gain scheduling — matches Python ─────────────────── */
     double TAU;
     if (com_range < 0.30)      TAU = RPOD_TAU_CLOSE;
@@ -156,6 +151,7 @@ int RPOD_terminal(const RPOD_TermState *state,
      * Mirrors Python: port = port_lvlh if _cand_range < PORT_SANITY_M else [0,0,0]
      */
     double port[3] = {0.0, 0.0, 0.0};
+    double port_vel[3] = {0.0, 0.0, 0.0};
     if (state->has_port) {
         double diff[3];
         vec3_sub(state->port_lvlh, pos, diff);
@@ -164,6 +160,9 @@ int RPOD_terminal(const RPOD_TermState *state,
             port[0] = state->port_lvlh[0];
             port[1] = state->port_lvlh[1];
             port[2] = state->port_lvlh[2];
+            port_vel[0] = state->port_vel_lvlh[0];
+            port_vel[1] = state->port_vel_lvlh[1];
+            port_vel[2] = state->port_vel_lvlh[2];
         }
         /* else: leave port = {0,0,0} — target CoM */
     }
@@ -172,6 +171,15 @@ int RPOD_terminal(const RPOD_TermState *state,
     double port_diff[3];
     vec3_sub(port, pos, port_diff);
     double port_range = vec3_norm(port_diff);
+    double tgt_range = port_range;
+    double rel_vel[3];
+    vec3_sub(vel, port_vel, rel_vel);
+    double rel_speed = vec3_norm(rel_vel);
+
+    if (tgt_range < RPOD_DOCK_DONE_M && rel_speed < RPOD_DOCK_MAX_SPEED_MS) {
+        accel_out[0] = accel_out[1] = accel_out[2] = 0.0;
+        return 2;
+    }
 
     /* ── Speed law (sqrt on com_range) — mirrors Python ─────── */
     /*
@@ -183,7 +191,7 @@ int RPOD_terminal(const RPOD_TermState *state,
     double rng_eff  = com_range > 0.001 ? com_range : 0.001;
     double v_des_mag = RPOD_K_SQRT_TERM * sqrt(rng_eff);
     if (v_des_mag > RPOD_V_TERM_MAX_MS) v_des_mag = RPOD_V_TERM_MAX_MS;
-    if (port_range < RPOD_DOCK_RANGE_M && v_des_mag > RPOD_V_CAPTURE_MS)
+    if (tgt_range < RPOD_DOCK_RANGE_M && v_des_mag > RPOD_V_CAPTURE_MS)
         v_des_mag = RPOD_V_CAPTURE_MS;
 
     /* ── Target direction ─────────────────────────────────────── */
@@ -199,6 +207,9 @@ int RPOD_terminal(const RPOD_TermState *state,
         vec3_scale(pos, -1.0 / (com_range + 1e-9), com_hat);
         vec3_scale(com_hat, v_des_mag, vel_des);
     }
+    vel_des[0] += port_vel[0];
+    vel_des[1] += port_vel[1];
+    vel_des[2] += port_vel[2];
 
     /* accel = (vel_des - vel) / TAU */
     double accel[3];
@@ -211,7 +222,7 @@ int RPOD_terminal(const RPOD_TermState *state,
     accel_out[1] = accel[1];
     accel_out[2] = accel[2];
 
-    return (port_range < RPOD_DOCK_RANGE_M) ? 1 : 0;
+    return (tgt_range < RPOD_DOCK_RANGE_M) ? 1 : 0;
 }
 
 /* ── RPOD_lost_target ─────────────────────────────────────────── */
@@ -292,6 +303,12 @@ int RPOD_terminal_simple(const RPOD_State *state,
     ts.port_lvlh[0] = 0.0;
     ts.port_lvlh[1] = 0.0;
     ts.port_lvlh[2] = 0.0;
+    ts.port_axis_lvlh[0] = 0.0;
+    ts.port_axis_lvlh[1] = 0.0;
+    ts.port_axis_lvlh[2] = 1.0;
+    ts.port_vel_lvlh[0] = 0.0;
+    ts.port_vel_lvlh[1] = 0.0;
+    ts.port_vel_lvlh[2] = 0.0;
     ts.has_port = 0;
 
     return RPOD_terminal(&ts, accel_max, accel_out, &_is_braking);

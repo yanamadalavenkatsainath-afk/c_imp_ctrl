@@ -10,10 +10,10 @@ The current build passes the full C unit test and Python SIL sequence.
 
 Latest verified closed-loop result:
 
-- RPOD enters terminal at about 6110 s.
-- Dock contact is latched at about 6125.5 s.
-- First DOCKED report is at about 6126 s.
-- Final reported contact range is about 0.21 m.
+- RPOD enters terminal at about 6111 s.
+- Dock contact is latched at about 6152 s.
+- First DOCKED report is at about 6152 s.
+- Final reported chief-center range is about 0.39 m while docking on the offset port.
 - The full build ends with `ALL PASS`.
 
 The latest build log is saved under:
@@ -148,6 +148,12 @@ Current guidance phases:
 
 The terminal path can accept an explicit docking-port measurement through `SensorFrame.port`. If the port packet is invalid, the controller falls back to center-of-mass targeting.
 
+Docking is not declared on range alone. The current terminal gate requires:
+
+- docking-port range below `RPOD_DOCK_DONE_M`,
+- port-relative speed below `RPOD_DOCK_MAX_SPEED_MS`,
+- a DOCKED latch in `flight_loop.c` once contact is declared.
+
 ## Build And Test
 
 ### Prerequisites
@@ -253,7 +259,7 @@ The latest verified run shows near machine-precision agreement for state and cov
 The current build-gate scenarios are:
 
 1. Detumble and sun acquisition.
-2. RPOD closure from 500 m to dock contact.
+2. RPOD closure from 500 m to offset dock-port contact.
 3. Long fine-pointing / momentum-dump guard behavior.
 
 For the RPOD closure scenario, the harness now stops when the C flight loop latches DOCKED. This avoids reporting meaningless post-contact free-flight drift as the final range.
@@ -274,6 +280,12 @@ The current docking-complete threshold is:
 RPOD_DOCK_DONE_M = 0.20
 ```
 
+The docking speed gate is:
+
+```c
+RPOD_DOCK_MAX_SPEED_MS = 0.010
+```
+
 The capture sphere is:
 
 ```c
@@ -287,31 +299,70 @@ The C sensor ABI includes a `PortPacket`:
 ```c
 typedef struct {
     double  port_lvlh[3];
+    double  port_axis_lvlh[3];
+    double  port_vel_lvlh[3];
     double  R_diag[3];
     uint8_t valid;
     uint8_t _pad[7];
 } PortPacket;
 ```
 
-If `sf->port.valid` is true, terminal guidance targets the reported docking port. If false, terminal guidance falls back to the chief center of mass.
+If `sf->port.valid` is true, terminal guidance targets the reported docking port and includes the reported port velocity in the desired terminal velocity. If false, terminal guidance falls back to the chief center of mass.
+
+The build-gate SIL now generates the docking-port packet from a simple chief attitude/tumble model. This is closer to the full Python simulation than the earlier fixed LVLH port, but it is still a SIL pose product rather than a complete flight camera/PnP pipeline.
+
+### Terminal Navigation Handling
+
+On entry to terminal approach, `flight_loop.c` inflates the TH-EKF position covariance once through `THEKF_inflate_process_noise()`. This lets close-range measurements dominate after the PROX-to-TERMINAL handoff without repeatedly disturbing the filter.
+
+## FDIR / FMECA Status
+
+The code has early FDIR hooks, but it is not yet a complete flight-grade fault-management architecture.
+
+Implemented protective behavior:
+
+- mode-manager `SAFE_MODE` on excessive angular rate or external fault input,
+- B-dot detumble and safe-mode recovery path,
+- reaction-wheel and acceleration command limiting,
+- TH-EKF Mahalanobis and absolute innovation gates,
+- camera spike and range-dropout SIL tests,
+- loop timing telemetry and missed-deadline counters,
+- DOCKED latch after terminal contact,
+- terminal docking speed gate,
+- terminal covariance inflation.
+
+Open FDIR/FMECA gaps before calling this flight-grade:
+
+- Add a central fault manager with latched fault words, debounce counters, and severity levels.
+- Treat gyro dropout/stale gyro as a fault or degraded state, not as zero angular rate.
+- Feed external fault state into `MM_update()` from the flight loop instead of always passing no fault.
+- Escalate repeated missed deadlines to safe or degraded mode.
+- Add sensor freshness counters, finite checks, physical bounds, and covariance bounds for all packets.
+- Add RPOD abort/hold/retreat behavior for terminal port loss instead of relying on center-of-mass fallback.
+- Require multiple consecutive contact-valid samples before declaring DOCKED.
+- Add approach-axis and attitude-alignment gates for terminal docking.
+- Add FDIR fault-injection tests: gyro dropout during tumble, stale range, invalid port in terminal, actuator saturation, CPU deadline fault, and NaN/Inf packet injection.
 
 ## Known Limitations
 
 - The current build-gate RPOD closure is translational. Full 6-DOF contact dynamics are not yet modeled.
 - The SIL plant stops at dock contact rather than simulating hard/soft capture mechanics.
-- Dock-port measurement is present in the C interface, but the build-gate SIL still uses simple close-range behavior.
-- The C RPOD terminal constants should be kept in sync with the cleaned Python terminal approach law.
+- Dock-port measurement is present in the C interface, and the build-gate SIL now generates a chief-attitude-derived moving port. It is still not a full camera/PnP chief-pose flight pipeline.
+- The C RPOD terminal constants are mirrored from the cleaned Python terminal approach law.
 - The build script currently contains a user-specific path to the companion Python simulation.
 - The current SIL is a PC validation environment, not an MCU/HIL deployment build.
+- FDIR is currently partial. Fault detection exists in several modules, but there is not yet a central fault manager or complete FMECA-to-test traceability.
 
 ## Recommended Next CDR Items
 
-1. Mirror the cleaned Python terminal constants in `rpod_ctrl.h`.
-2. Feed a realistic noisy dock-port measurement into `closed_loop_sil.py`.
-3. Add a test that verifies `SensorFrame.port` changes terminal targeting.
-4. Separate PC SIL build settings from embedded target build settings.
-5. Replace hard-coded local paths with an environment variable or config file.
-6. Add a short HIL-oriented packet specification for `SensorFrame` and `CommandFrame`.
+1. Add a central C fault manager and wire its fault word into `MM_update()`.
+2. Replace terminal center-of-mass fallback with explicit `HOLD`, `RETREAT`, or `ABORT` behavior when the port packet is invalid.
+3. Add terminal approach-axis and attitude-alignment gates.
+4. Add multi-sample docking confirmation.
+5. Separate PC SIL build settings from embedded target build settings.
+6. Replace hard-coded local paths with an environment variable or config file.
+7. Add a short HIL-oriented packet specification for `SensorFrame` and `CommandFrame`.
+8. Add a formal FDIR/FMECA traceability table linking each fault to detection, response, and test coverage.
 
 ## Notes For Pushing
 
@@ -328,4 +379,3 @@ Only source, tests, and documentation should be committed unless a generated art
 
 Venkat Sainath  
 MSc Space Engineering
-

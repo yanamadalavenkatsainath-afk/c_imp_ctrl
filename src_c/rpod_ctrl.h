@@ -52,21 +52,22 @@
 #define RPOD_K_SQRT             0.008944272
 
 /* ── TERMINAL constants ──────────────────────────────────────── */
-#define RPOD_V_TERM_MAX_MS     0.050    /* max speed in TERMINAL [m/s]      */
-#define RPOD_V_CAPTURE_MS      0.005    /* speed inside capture zone [m/s]  */
+#define RPOD_V_TERM_MAX_MS     0.025    /* max speed in TERMINAL [m/s]      */
+#define RPOD_V_CAPTURE_MS      0.0015   /* speed inside capture zone [m/s]  */
 #define RPOD_DOCK_RANGE_M      0.30     /* capture sphere radius [m]        */
 #define RPOD_DOCK_DONE_M       0.20     /* docking complete [m]             */
+#define RPOD_DOCK_MAX_SPEED_MS 0.010    /* max port-relative dock speed     */
 #define RPOD_PORT_SANITY_M     2.0      /* EKF spike guard: max port dist   */
 #define RPOD_BRAKE_DONE_MS     0.010    /* entry brake target speed [m/s]   */
 #define RPOD_BRAKE_ENTRY_MS    0.015    /* brake if entry speed > this [m/s]*/
 
 /* TAU gain scheduling thresholds */
-#define RPOD_TAU_CLOSE         5.0      /* TAU [s] for com_range < 0.30m   */
-#define RPOD_TAU_MID           3.0      /* TAU [s] for 0.30m–0.60m         */
-#define RPOD_TAU_FAR           2.0      /* TAU [s] for com_range >= 0.60m  */
+#define RPOD_TAU_CLOSE         8.0      /* TAU [s] for com_range < 0.30m   */
+#define RPOD_TAU_MID           5.0      /* TAU [s] for 0.30m-0.60m         */
+#define RPOD_TAU_FAR           3.0      /* TAU [s] for com_range >= 0.60m  */
 
 /* Terminal sqrt-law gain: V_TERM_MAX_MS / sqrt(TERMINAL_M) */
-#define RPOD_K_SQRT_TERM       0.055902 /* = 0.05 / sqrt(0.8) */
+#define RPOD_K_SQRT_TERM       0.027951 /* = 0.025 / sqrt(0.8) */
 
 /* ── TERMINAL sqrt-law gain (for test_rpod.c compatibility) ─── */
 /* K_SQRT_TERM defined above as RPOD_K_SQRT_TERM.
@@ -89,14 +90,17 @@ typedef struct {
 /**
  * RPOD_TermState — extended TERMINAL input with port information.
  *
- * port_lvlh[3]:  docking port position in LVLH [m].
- *                Set to {0,0,0} if unknown — falls back to CoM targeting.
- * has_port:      1 if port_lvlh is valid, 0 to use CoM.
+ * port_lvlh[3]:      docking port position in LVLH [m].
+ * port_axis_lvlh[3]: outward docking axis in LVLH, reserved for alignment gates.
+ * port_vel_lvlh[3]:  docking port velocity in LVLH [m/s].
+ * has_port:          1 if port fields are valid, 0 to use CoM.
  */
 typedef struct {
     double pos[3];
     double vel[3];
     double port_lvlh[3];
+    double port_axis_lvlh[3];
+    double port_vel_lvlh[3];
     int    has_port;
 } RPOD_TermState;
 

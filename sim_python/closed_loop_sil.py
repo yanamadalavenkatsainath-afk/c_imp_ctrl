@@ -102,6 +102,11 @@ T_GEO    = 2 * math.pi / N_GEO
 DT_FAST  = 0.01    # 100 Hz
 DT_SLOW  = 0.1     # 10 Hz
 DEBUG_PRINT_PERIOD_S = 10.0
+DOCK_PORT_BODY = np.array([0.0, 0.0, 0.5])
+DOCK_AXIS_BODY = np.array([0.0, 0.0, 1.0])
+CHIEF_OMEGA_LVLH = np.array([0.0012, -0.0015, 0.0008])
+PORT_SENSOR_RANGE_M = 10.0
+PORT_SENSOR_SIGMA_M = 0.02
 
 # Pass thresholds
 DETUMBLE_TIME_S      = 300.0
@@ -120,6 +125,40 @@ def check(cond: bool, msg: str):
     print(f"    {mark} -- {msg}")
     if cond: PASS_TOTAL += 1
     else:    FAIL_TOTAL += 1
+
+def quat_to_rot(q: np.ndarray) -> np.ndarray:
+    w, x, y, z = q
+    return np.array([
+        [1-2*(y*y+z*z),   2*(x*y-w*z),   2*(x*z+w*y)],
+        [  2*(x*y+w*z), 1-2*(x*x+z*z),   2*(y*z-w*x)],
+        [  2*(x*z-w*y),   2*(y*z+w*x), 1-2*(x*x+y*y)],
+    ])
+
+def propagate_quat(q: np.ndarray, omega: np.ndarray, dt: float) -> np.ndarray:
+    wx, wy, wz = omega
+    Omega = np.array([
+        [ 0,  -wx, -wy, -wz],
+        [ wx,  0,   wz, -wy],
+        [ wy, -wz,  0,   wx],
+        [ wz,  wy, -wx,  0 ],
+    ])
+    q_next = q + 0.5 * dt * (Omega @ q)
+    return q_next / (np.linalg.norm(q_next) + 1e-30)
+
+def fill_port_packet(sf: SensorFrame, rng, q_chief, omega_chief, rng_source) -> None:
+    if rng >= PORT_SENSOR_RANGE_M:
+        return
+    R_c2l = quat_to_rot(q_chief)
+    port_lvlh = R_c2l @ DOCK_PORT_BODY
+    axis_lvlh = R_c2l @ DOCK_AXIS_BODY
+    port_vel = np.cross(omega_chief, port_lvlh)
+    z_port = port_lvlh + rng_source.standard_normal(3) * PORT_SENSOR_SIGMA_M
+    for i in range(3):
+        sf.port.port_lvlh[i] = float(z_port[i])
+        sf.port.port_axis_lvlh[i] = float(axis_lvlh[i])
+        sf.port.port_vel_lvlh[i] = float(port_vel[i])
+        sf.port.R_diag[i] = PORT_SENSOR_SIGMA_M ** 2
+    sf.port.valid = 1
 
 
 # ===============================================================
@@ -190,6 +229,8 @@ class PhysicsPlantSim:
         # Zero gyro bias: keeps omega_est clean during MEKF initialisation.
         # Bias estimation is already verified in verify_realtime_sil.py.
         self._gyro_bias = np.zeros(3)
+        self.q_chief = np.array([1.0, 0.0, 0.0, 0.0])
+        self.omega_chief_lvlh = CHIEF_OMEGA_LVLH.copy()
 
         print(f"  ClosedLoopPlant: PhysicsPlantSim "
               f"(I_diag={self._I_DIAG*1e3} g.m2, "
@@ -287,6 +328,7 @@ class PhysicsPlantSim:
         self.h_rw      = np.clip(self.h_rw, -self.h_max, self.h_max)
 
         self._propagate_attitude(dt, tau_mtq + tau_rw_on_body)
+        self.q_chief = propagate_quat(self.q_chief, self.omega_chief_lvlh, dt)
         self._cw_step(dt, np.asarray(accel_lvlh))
 
         self.t    += dt
@@ -342,6 +384,9 @@ class PhysicsPlantSim:
                     sf.camera.R_diag[i]   = 0.01
                 sf.camera.valid = 1
 
+            if rng < PORT_SENSOR_RANGE_M:
+                fill_port_packet(sf, rng, self.q_chief, self.omega_chief_lvlh, self.rng)
+
         sf.sim_tick   = self.tick
         sf.sim_time_s = self.t
         return sf
@@ -387,6 +432,8 @@ class ClosedLoopPlant:
             self.camera     = CameraSensor()
             self._r_chief_eci = np.array([A_GEO, 0.0, 0.0])
             self._v_chief_eci = np.array([0.0, math.sqrt(MU/A_GEO), 0.0])
+            self.q_chief = np.array([1.0, 0.0, 0.0, 0.0])
+            self.omega_chief_lvlh = CHIEF_OMEGA_LVLH.copy()
             print("  ClosedLoopPlant: real Python plant models active")
         else:
             self._phys = PhysicsPlantSim(x0_cw, omega0_body, q0_body)
@@ -404,6 +451,7 @@ class ClosedLoopPlant:
         tau_rw = np.asarray(torque_rw)
         m_mtq  = np.asarray(dipole_mtq)
         self.cw.step(dt=dt, accel_lvlh=accel)
+        self.q_chief = propagate_quat(self.q_chief, self.omega_chief_lvlh, dt)
         self.rw.apply_torque(tau_rw, dt)
         r_chief_km = self._r_chief_eci / 1e3
         # Use a LEO-class rotating field for this build-gate closed-loop test.
@@ -470,6 +518,10 @@ class ClosedLoopPlant:
                     sf.camera.pos_lvlh[i] = float(z_cam[i])
                     sf.camera.R_diag[i]   = float(R_cam[i, i])
                 sf.camera.valid = 1
+
+        if np.linalg.norm(dr_lvlh) < PORT_SENSOR_RANGE_M:
+            fill_port_packet(sf, np.linalg.norm(dr_lvlh),
+                             self.q_chief, self.omega_chief_lvlh, np.random)
 
         sf.sim_tick   = int(self.t / DT_FAST)
         sf.sim_time_s = self.t

@@ -65,6 +65,7 @@ static double g_dipole_mtq_hold[3] = {0.0, 0.0, 0.0};
 static double g_torque_rw_hold[3]  = {0.0, 0.0, 0.0};
 static int    g_rpod_mode_hold     = -1;
 static int    g_docked_latched     = 0;
+static int    g_terminal_inflated  = 0;
 
 static void _clear_attitude_holds(void){
     g_dipole_mtq_hold[0]=g_dipole_mtq_hold[1]=g_dipole_mtq_hold[2]=0.0;
@@ -99,7 +100,7 @@ void flight_loop_init(double a_chief_m,double e_chief,double mu,double dt_thekf_
     RW_init(&g_rw);
     MTQ_init(&g_mtq);
     ATTCTRL_init(&g_attctrl);
-    g_tick=0; g_max_loop_ms=0.0; g_missed=0; g_is_braking=-1; g_rpod_mode_hold=-1; g_docked_latched=0;
+    g_tick=0; g_max_loop_ms=0.0; g_missed=0; g_is_braking=-1; g_rpod_mode_hold=-1; g_docked_latched=0; g_terminal_inflated=0;
     g_cmd_frame.timing.deadline_ms=g_deadline_ms;
     printf("  flight_loop v2: full ADCS stack enabled\n");
 }
@@ -164,6 +165,7 @@ CommandFrame *flight_loop_step(void){
         g_accel_lvlh_hold[0]=g_accel_lvlh_hold[1]=g_accel_lvlh_hold[2]=0.0;
         g_rpod_mode_hold=-1;
         g_is_braking=-1;
+        g_terminal_inflated=0;
         _clear_attitude_holds();
         cf->cmd.rpod_mode=-1;
         cf->cmd.accel_lvlh[0]=cf->cmd.accel_lvlh[1]=cf->cmd.accel_lvlh[2]=0.0;
@@ -175,6 +177,7 @@ CommandFrame *flight_loop_step(void){
         g_accel_lvlh_hold[0]=g_accel_lvlh_hold[1]=g_accel_lvlh_hold[2]=0.0;
         g_rpod_mode_hold=-1;
         g_is_braking=-1;
+        g_terminal_inflated=0;
         g_torque_rw_hold[0]=g_torque_rw_hold[1]=g_torque_rw_hold[2]=0.0;
         cf->cmd.rpod_mode=-1;
         cf->cmd.accel_lvlh[0]=cf->cmd.accel_lvlh[1]=cf->cmd.accel_lvlh[2]=0.0;
@@ -191,6 +194,7 @@ CommandFrame *flight_loop_step(void){
         g_accel_lvlh_hold[0]=g_accel_lvlh_hold[1]=g_accel_lvlh_hold[2]=0.0;
         g_rpod_mode_hold=-1;
         g_is_braking=-1;
+        g_terminal_inflated=0;
         g_dipole_mtq_hold[0]=g_dipole_mtq_hold[1]=g_dipole_mtq_hold[2]=0.0;
         cf->cmd.rpod_mode=-1;
         cf->cmd.accel_lvlh[0]=cf->cmd.accel_lvlh[1]=cf->cmd.accel_lvlh[2]=0.0;
@@ -229,6 +233,7 @@ CommandFrame *flight_loop_step(void){
         g_accel_lvlh_hold[0]=g_accel_lvlh_hold[1]=g_accel_lvlh_hold[2]=0.0;
         g_rpod_mode_hold=-1;
         g_is_braking=-1;
+        g_terminal_inflated=0;
         cf->cmd.rpod_mode=-1;
         cf->cmd.accel_lvlh[0]=cf->cmd.accel_lvlh[1]=cf->cmd.accel_lvlh[2]=0.0;
         if(sf->mag.valid){
@@ -292,7 +297,12 @@ CommandFrame *flight_loop_step(void){
                 RPOD_prox_ops(&g_rpod_state,tr,g_thekf.n,ar,new_acc);
                 g_rpod_mode_hold=10;
                 g_is_braking=-1;
+                g_terminal_inflated=0;
             }else if(tr>RPOD_DOCK_DONE_M){
+                if(!g_terminal_inflated){
+                    THEKF_inflate_process_noise(&g_thekf,10.0);
+                    g_terminal_inflated=1;
+                }
                 RPOD_TermState ts;
                 ts.pos[0]=g_rpod_state.pos[0]; ts.pos[1]=g_rpod_state.pos[1]; ts.pos[2]=g_rpod_state.pos[2];
                 ts.vel[0]=g_rpod_state.vel[0]; ts.vel[1]=g_rpod_state.vel[1]; ts.vel[2]=g_rpod_state.vel[2];
@@ -301,8 +311,16 @@ CommandFrame *flight_loop_step(void){
                     ts.port_lvlh[0]=sf->port.port_lvlh[0];
                     ts.port_lvlh[1]=sf->port.port_lvlh[1];
                     ts.port_lvlh[2]=sf->port.port_lvlh[2];
+                    ts.port_axis_lvlh[0]=sf->port.port_axis_lvlh[0];
+                    ts.port_axis_lvlh[1]=sf->port.port_axis_lvlh[1];
+                    ts.port_axis_lvlh[2]=sf->port.port_axis_lvlh[2];
+                    ts.port_vel_lvlh[0]=sf->port.port_vel_lvlh[0];
+                    ts.port_vel_lvlh[1]=sf->port.port_vel_lvlh[1];
+                    ts.port_vel_lvlh[2]=sf->port.port_vel_lvlh[2];
                 }else{
                     ts.port_lvlh[0]=0.0; ts.port_lvlh[1]=0.0; ts.port_lvlh[2]=0.0;
+                    ts.port_axis_lvlh[0]=0.0; ts.port_axis_lvlh[1]=0.0; ts.port_axis_lvlh[2]=1.0;
+                    ts.port_vel_lvlh[0]=0.0; ts.port_vel_lvlh[1]=0.0; ts.port_vel_lvlh[2]=0.0;
                 }
                 int ret=RPOD_terminal(&ts,ar,new_acc,&g_is_braking);
                 g_rpod_mode_hold=(ret==2)?12:11;
@@ -315,6 +333,7 @@ CommandFrame *flight_loop_step(void){
                 g_docked_latched=1;
                 g_rpod_mode_hold=12;
                 g_is_braking=-1;
+                g_terminal_inflated=0;
             }
             g_accel_lvlh_hold[0]=new_acc[0];
             g_accel_lvlh_hold[1]=new_acc[1];
@@ -353,7 +372,7 @@ void flight_loop_stop(void){g_running=0;}
 void flight_loop_reset(void){
     g_tick=0;g_max_loop_ms=0.0;g_missed=0;g_is_braking=-1;
     g_accel_lvlh_hold[0]=g_accel_lvlh_hold[1]=g_accel_lvlh_hold[2]=0.0;
-    g_rpod_mode_hold=-1; g_docked_latched=0;
+    g_rpod_mode_hold=-1; g_docked_latched=0; g_terminal_inflated=0;
     _clear_attitude_holds();
     memset(&g_cmd_frame,0,sizeof(g_cmd_frame));
     memset(&g_sensor_frame,0,sizeof(g_sensor_frame));

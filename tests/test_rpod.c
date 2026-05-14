@@ -26,6 +26,11 @@ static double norm3(const double v[3]) {
     return sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
 }
 
+static void init_term_state(RPOD_TermState *s) {
+    memset(s, 0, sizeof(*s));
+    s->port_axis_lvlh[2] = 1.0;
+}
+
 
 /* ── Test 1: PROX_OPS — correct closing speed selected ─────────
    At range 307m (between 200m and 500m profile entries) the
@@ -192,6 +197,88 @@ static void test_terminal_docking(void) {
 
 
 /* ── Test 6: PROX_OPS — deadband inside dock gate ─────────────*/
+/* Test 5b: TERMINAL - high-speed contact is not docked */
+static void test_terminal_docking_speed_gate(void) {
+    printf("\nTest 5b: TERMINAL docking requires low relative speed\n");
+
+    double accel_max = 0.020;
+
+    RPOD_State state;
+    state.pos[0] = 0.15;
+    state.pos[1] = 0.0;
+    state.pos[2] = 0.0;
+    state.vel[0] = -0.050;
+    state.vel[1] = 0.0;
+    state.vel[2] = 0.0;
+
+    double accel[3];
+    int ret = RPOD_terminal_simple(&state, accel_max, accel);
+
+    CHECK(ret != 2, "TERMINAL does not dock when relative speed is too high");
+    CHECK(norm3(accel) > 0.0, "guidance keeps braking/controlling instead");
+    printf("  ret = %d  |accel| = %.2e\n", ret, norm3(accel));
+}
+
+/* Test 5c: TERMINAL - offset port, not CoM, is the dock target */
+static void test_terminal_offset_port_target(void) {
+    printf("\nTest 5c: TERMINAL docking uses offset port range\n");
+
+    double accel_max = 0.020;
+    RPOD_TermState state;
+    init_term_state(&state);
+
+    state.pos[0] = 0.0;
+    state.pos[1] = 0.0;
+    state.pos[2] = 0.46;
+    state.vel[0] = 0.0;
+    state.vel[1] = 0.0;
+    state.vel[2] = 0.001;
+    state.port_lvlh[0] = 0.0;
+    state.port_lvlh[1] = 0.0;
+    state.port_lvlh[2] = 0.50;
+    state.has_port = 1;
+
+    double accel[3];
+    int brake = 0;
+    int ret = RPOD_terminal(&state, accel_max, accel, &brake);
+
+    CHECK(ret == 2, "TERMINAL docks on port range even when CoM is about 0.46m");
+    CHECK(norm3(accel) < 1e-9, "zero accel output after port docking");
+    printf("  ret = %d  com=%.2fm  port=%.2fm\n",
+           ret, norm3(state.pos),
+           fabs(state.port_lvlh[2] - state.pos[2]));
+}
+
+/* Test 5d: TERMINAL - valid port prevents premature CoM dock */
+static void test_terminal_port_prevents_com_dock(void) {
+    printf("\nTest 5d: TERMINAL valid port prevents premature CoM docking\n");
+
+    double accel_max = 0.020;
+    RPOD_TermState state;
+    init_term_state(&state);
+
+    state.pos[0] = 0.0;
+    state.pos[1] = 0.0;
+    state.pos[2] = 0.15;
+    state.vel[0] = 0.0;
+    state.vel[1] = 0.0;
+    state.vel[2] = 0.001;
+    state.port_lvlh[0] = 0.0;
+    state.port_lvlh[1] = 0.0;
+    state.port_lvlh[2] = 0.50;
+    state.has_port = 1;
+
+    double accel[3];
+    int brake = 0;
+    int ret = RPOD_terminal(&state, accel_max, accel, &brake);
+
+    CHECK(ret != 2, "TERMINAL waits for port range, not CoM range");
+    CHECK(norm3(accel) > 0.0, "guidance commands motion toward the port");
+    printf("  ret = %d  com=%.2fm  port=%.2fm\n",
+           ret, norm3(state.pos),
+           fabs(state.port_lvlh[2] - state.pos[2]));
+}
+
 static void test_prox_deadband(void) {
     printf("\nTest 6: PROX_OPS deadband below dock gate\n");
 
@@ -219,7 +306,7 @@ static void test_prox_deadband(void) {
    At 2m from chief, k*range = 0.010*2 = 0.020 > VMAX=0.005.
    Desired speed must be capped at RPOD_TERMINAL_VMAX.           */
 static void test_terminal_vmax(void) {
-    printf("\nTest 7: TERMINAL speed capped at VMAX=5mm/s\n");
+    printf("\nTest 7: TERMINAL speed capped at VMAX=25mm/s\n");
 
     double accel_max = 0.020;
 
@@ -254,6 +341,9 @@ int main(void) {
     test_prox_terminal_handoff();
     test_terminal_decel();
     test_terminal_docking();
+    test_terminal_docking_speed_gate();
+    test_terminal_offset_port_target();
+    test_terminal_port_prevents_com_dock();
     test_prox_deadband();
     test_terminal_vmax();
 

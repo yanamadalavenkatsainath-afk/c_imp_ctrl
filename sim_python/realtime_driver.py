@@ -28,6 +28,11 @@ from typing import Optional, List
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 _DLL_PATH = os.path.join(_ROOT, "gnc_lib.dll")
+DOCK_PORT_BODY = np.array([0.0, 0.0, 0.5])
+DOCK_AXIS_BODY = np.array([0.0, 0.0, 1.0])
+CHIEF_OMEGA_LVLH = np.array([0.0012, -0.0015, 0.0008])
+PORT_SENSOR_RANGE_M = 10.0
+PORT_SENSOR_SIGMA_M = 0.02
 
 # -- ctypes struct mirrors of C headers ---------------------------
 
@@ -58,6 +63,8 @@ class CameraPacket(ctypes.Structure):
 class PortPacket(ctypes.Structure):
     _fields_ = [
         ("port_lvlh", ctypes.c_double * 3),
+        ("port_axis_lvlh", ctypes.c_double * 3),
+        ("port_vel_lvlh", ctypes.c_double * 3),
         ("R_diag",    ctypes.c_double * 3),
         ("valid",     ctypes.c_uint8),
         ("_pad",      ctypes.c_uint8 * 7),
@@ -135,6 +142,25 @@ class CommandFrame(ctypes.Structure):
         ("ekf_updated", ctypes.c_uint8),
         ("_pad",        ctypes.c_uint8 * 7),
     ]
+
+def _quat_to_rot(q: np.ndarray) -> np.ndarray:
+    w, x, y, z = q
+    return np.array([
+        [1-2*(y*y+z*z),   2*(x*y-w*z),   2*(x*z+w*y)],
+        [  2*(x*y+w*z), 1-2*(x*x+z*z),   2*(y*z-w*x)],
+        [  2*(x*z-w*y),   2*(y*z+w*x), 1-2*(x*x+y*y)],
+    ])
+
+def _propagate_quat(q: np.ndarray, omega: np.ndarray, dt: float) -> np.ndarray:
+    wx, wy, wz = omega
+    Omega = np.array([
+        [ 0,  -wx, -wy, -wz],
+        [ wx,  0,   wz, -wy],
+        [ wy, -wz,  0,   wx],
+        [ wz,  wy, -wx,  0 ],
+    ])
+    q_next = q + 0.5 * dt * (Omega @ q)
+    return q_next / (np.linalg.norm(q_next) + 1e-30)
 
 # -- Telemetry log row --------------------------------------------
 @dataclass
@@ -241,6 +267,8 @@ class FakeSensorSim:
         # giving the MEKF a real signal to observe and estimate gyro bias.
         self.q_true = np.array([1.0, 0.0, 0.0, 0.0])
         self._omega_true = np.array([0.001, 0.0005, -0.0003])  # rad/s, matches gyro sim
+        self.q_chief = np.array([1.0, 0.0, 0.0, 0.0])
+        self.omega_chief_lvlh = CHIEF_OMEGA_LVLH.copy()
 
         # Dropout scenario flags (set externally)
         self.range_dropout  = False
@@ -282,6 +310,7 @@ class FakeSensorSim:
         dq = 0.5 * dt * Omega @ q
         q = q + dq
         self.q_true = q / np.linalg.norm(q)
+        self.q_chief = _propagate_quat(self.q_chief, self.omega_chief_lvlh, dt)
 
         return self.x
 
@@ -324,6 +353,21 @@ class FakeSensorSim:
                 sf.camera.valid = 1
             else:
                 sf.camera.valid = 0
+
+            if rng < PORT_SENSOR_RANGE_M and not self.camera_dropout:
+                R_c2l = _quat_to_rot(self.q_chief)
+                port_lvlh = R_c2l @ DOCK_PORT_BODY
+                axis_lvlh = R_c2l @ DOCK_AXIS_BODY
+                port_vel = np.cross(self.omega_chief_lvlh, port_lvlh)
+                z_port = port_lvlh + self.rng.standard_normal(3) * PORT_SENSOR_SIGMA_M
+                for i in range(3):
+                    sf.port.port_lvlh[i] = z_port[i]
+                    sf.port.port_axis_lvlh[i] = axis_lvlh[i]
+                    sf.port.port_vel_lvlh[i] = port_vel[i]
+                    sf.port.R_diag[i]    = PORT_SENSOR_SIGMA_M ** 2
+                sf.port.valid = 1
+            else:
+                sf.port.valid = 0
 
             # Magnetometer -- needed for MEKF bias estimation.
             # z_body = Rb(q_true)^T @ v_inertial + noise
