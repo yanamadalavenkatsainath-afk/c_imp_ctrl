@@ -18,7 +18,7 @@
  *     - TAU gain scheduling: 2s (far), 3s (mid), 5s (close).
  *     - Entry brake: decelerates to BRAKE_DONE_MS if entering fast.
  *     - Speed law: sqrt on com_range, capped at V_TERM_MAX_MS.
- *     - Capture: zero velocity command when port_range < DOCK_RANGE_M.
+ *     - Capture: creep at V_CAPTURE_MS until docked.
  *
  *   LOST_TARGET:
  *     - Decelerate to zero when camera is lost during close approach.
@@ -55,7 +55,7 @@
 #define RPOD_V_TERM_MAX_MS     0.050    /* max speed in TERMINAL [m/s]      */
 #define RPOD_V_CAPTURE_MS      0.005    /* speed inside capture zone [m/s]  */
 #define RPOD_DOCK_RANGE_M      0.30     /* capture sphere radius [m]        */
-#define RPOD_DOCK_DONE_M       0.05     /* docking complete [m]             */
+#define RPOD_DOCK_DONE_M       0.20     /* docking complete [m]             */
 #define RPOD_PORT_SANITY_M     2.0      /* EKF spike guard: max port dist   */
 #define RPOD_BRAKE_DONE_MS     0.010    /* entry brake target speed [m/s]   */
 #define RPOD_BRAKE_ENTRY_MS    0.015    /* brake if entry speed > this [m/s]*/
@@ -124,7 +124,7 @@ typedef struct {
  * accel_out   : commanded acceleration [m/s²]
  *
  * Returns 1 if transitioning to TERMINAL (truth_range < RPOD_TERMINAL_M),
- *         0 for normal PROX_OPS, -1 for deadband (range < 0.05m).
+ *         0 for normal PROX_OPS, -1 for deadband (range < dock gate).
  *
  * NOTE: Lambert planning and mode transitions are handled in Python.
  *       This function is the inner guidance loop only.

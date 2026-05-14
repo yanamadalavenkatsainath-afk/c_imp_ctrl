@@ -1,0 +1,423 @@
+=== Ensuring Python package structure in flight sim ===
+  OK: estimation\__init__.py exists 
+
+=== Generating pyrightconfig.json ===
+  Written: C:\Users\Venkat\OneDrive\Desktop\appex\Satellite_GNC\pyrightconfig.json
+
+=== Compiling GNC library (full stack) ===
+Built: gnc_lib.dll
+
+=== Compiling flight_loop standalone smoke test ===
+
+=== Compiling unit tests ===
+
+=== Running flight_loop smoke test ===
+Flight loop v2 standalone smoke test
+  FSW ModeManager initialised — starting in DETUMBLE
+  flight_loop v2: full ADCS stack enabled
+  FSW [    1.2s] DETUMBLE             -> SUN_ACQUISITION
+  FSW [    1.2s] SUN_ACQUISITION      -> FINE_POINTING
+  Tick 299: fsw_mode=3 range=500.0m loop=0.000ms max=0.083ms missed=0
+  300 ticks in 0.27ms (avg 0.001ms/tick)
+  PASS
+
+=== Running C unit tests ===
+=== TH-EKF C Verification ===
+
+Test 1: PSE drift over 1 GEO orbit
+  Position drift after 1 GEO orbit: 0.1 m
+  ✓ PASS — drift < 200m (O(e) CW error for e=0.001)
+
+Test 2: EKF update reduces position std
+  ✓ PASS — position std reduced after 120 update steps
+
+Test 3: CW STM determinant ≈ 1 (symplecticity)
+  STM trace at nt=0.01: 5.9999  (valid range 2-8)
+  ✓ PASS — STM trace in valid range
+
+=== Done ===
+=== MEKF C Verification ===
+
+Test 1: Quaternion stays unit norm after 100 predict steps
+  Quaternion norm after 100 steps: 1.00000000
+  ✓ PASS — |q| = 1.0 ± 1e-5
+
+Test 2: Update with truth measurement — observable axes reduce
+  P[1][1] before: 0.010000   after: 1.00e-06
+  P[2][2] before: 0.010000   after: 1.00e-06
+  ✓ PASS — P[1][1] reduced (observable axis)
+  ✓ PASS — P[2][2] reduced (observable axis)
+  ✓ PASS — quaternion unchanged with zero innovation
+
+Test 3: Bias estimation — injected bias recovered
+  Bias error after 500 steps: 0.000500 rad/s
+  ✓ PASS — bias error < 2 mrad/s
+
+Test 4: Covariance stays symmetric after mixed predict/update
+  ✓ PASS — P is symmetric
+  ✓ PASS — P diagonal is positive
+
+=== Done ===
+=== RPOD Controller C Verification ===
+
+Test 1: PROX_OPS velocity profile selection
+  ✓ PASS — accel clamped to accel_max at 307m
+  ✓ PASS — accel points toward chief (+y)
+  accel = [-0.0000, 0.0200, -0.0000] m/s²
+
+Test 2: PROX_OPS closing speed at 50m (sqrt law)
+  ✓ PASS — accel_x = -K_SQRT*sqrt(50)/TAU (sqrt law at 50m)
+  accel[0] = -0.01265  expected -0.01265
+
+Test 3: PROX_OPS → TERMINAL handoff at range < 0.8m
+  ✓ PASS — PROX_OPS delegates to TERMINAL for range < 0.8m
+  prox=[-0.01218,0.00000,0.00000]  term=[-0.01218,0.00000,0.00000]
+
+Test 4: TERMINAL sqrt-law deceleration at 40cm
+  ✓ PASS — accel ≈ 0 when already at desired closing speed
+  ✓ PASS — returns 0 (not docked) at 40cm
+  v_des=0.03536 m/s  |accel| = 0.00e+00 m/s²
+
+Test 5: TERMINAL docking detection at range < 5cm
+  ✓ PASS — TERMINAL returns 2 (docked) when range < 5cm
+  ✓ PASS — zero accel output when docked
+  ret = 2  |accel| = 0.00e+00
+
+Test 6: PROX_OPS deadband below 5cm
+  ✓ PASS — zero accel inside docking zone (terminal path)
+
+Test 7: TERMINAL speed capped at VMAX=5mm/s
+  ✓ PASS — k*range > VMAX — cap is needed at 2m
+  ✓ PASS — accel ≈ 0 when already at VMAX closing speed
+  vel_des_mag = 0.1118  VMAX = 0.0500  |accel| = 0.00e+00
+
+=== ALL PASS (0 failures) ===
+=== QUEST C Verification ===
+
+Test 1: Identity attitude (q=[1,0,0,0])
+  q=[1.000000,0.000000,0.000000,0.000000]  quality=0.5000
+  ✓ PASS — w≈1 for identity attitude (within 0.02)
+  ✓ PASS — x≈0 for identity attitude (within 0.02)
+  ✓ PASS — y≈0 for identity attitude (within 0.02)
+  ✓ PASS — quality > threshold
+
+Test 2: Known 30° x-rotation, no noise
+  Attitude error: 0.0000°  quality=0.7000
+  ✓ PASS — attitude error < 1° for known 30° rotation
+  ✓ PASS — quality > threshold
+
+Test 3: Noisy measurements (sigma=5mrad)
+  Attitude error: 12.9068°  quality=0.9991
+  ✓ PASS — attitude error < 20° under 5mrad noise (bounded, not catastrophic)
+  ✓ PASS — quality > threshold under noise
+
+Test 4: Degenerate geometry — parallel reference vectors
+  (TRIAD hard-fails here; QUEST degrades gracefully)
+  quality=0.5197  ok=1
+  ✓ PASS — quaternion stays unit norm (no NaN/crash)
+  (quality 0.5197; well-conditioned geometry gives >0.9)
+  ✓ PASS — quality < 0.999 for nearly-parallel geometry
+
+Test 5: 3-vector QUEST (mag + sun + nadir)
+  Attitude error: 0.0001°  quality=0.9716
+  ✓ PASS — 3-vector error < 1°
+  ✓ PASS — 3-vector quality > 0.5
+
+Test 6: QUEST_nadir_inertial helper
+  nadir=[-1.0000,-0.0000,-0.0000]
+  ✓ PASS — nadir points toward -x
+  ✓ PASS — nadir y=0
+  ✓ PASS — nadir z=0
+
+=== ALL PASS (0 failures) ===
+=== ADCS C Verification ===
+
+Test 1: B-dot — zero angular rate gives zero dipole
+  |m_cmd| = 0.00e+00 A·m²
+  ✓ PASS — zero dipole when omega=0
+
+Test 2: B-dot — torque opposes angular rate
+  m_cmd = [0.0000, 0.0000, 300.0000] A·m²
+  torque= [-6.00e-03, 0.00e+00, 0.00e+00] N·m
+  ✓ PASS — non-zero dipole when omega and B non-parallel
+  ✓ PASS — dipole clipped to m_max
+
+Test 3: B-dot — dipole clips at m_max
+  ✓ PASS — each dipole component ≤ m_max
+  ✓ PASS — each dipole component ≤ m_max
+  ✓ PASS — each dipole component ≤ m_max
+  m_cmd = [0.0000, 0.0000, 0.0000] (m_max=300.00)
+
+Test 4: Reaction wheel — momentum integrates correctly
+  h   = [0.001000, -0.000500, 0.000200] N·m·s
+  exp = [0.001000, -0.000500, 0.000200]
+  ✓ PASS — h[i] matches tau*dt*steps
+  ✓ PASS — h[i] matches tau*dt*steps
+  ✓ PASS — h[i] matches tau*dt*steps
+
+Test 5: Reaction wheel — momentum clips at h_max
+  h[0] = 4.00000  h_max = 4.000
+  ✓ PASS — h[0] saturates at h_max
+  ✓ PASS — h[1] = 0 (no torque applied)
+
+Test 6: MTQ — momentum dump dipole direction
+  m = [-0.0000, -0.0000, -0.4000]
+  ✓ PASS — m[0] ≈ 0 (h×B has no x component)
+  ✓ PASS — m[1] ≈ 0 (h×B has no y component)
+  ✓ PASS — m[2] < 0 (dumps h in correct direction)
+  ✓ PASS — dipole clipped to m_max
+
+Test 7: MTQ — torque = m × B
+  tau = [0.00e+00, 0.00e+00, 2.00e-06]
+  ✓ PASS — tau[0] = 0
+  ✓ PASS — tau[1] = 0
+  ✓ PASS — tau[2] = m[0]*B[1] = 2e-6 N·m
+
+Test 8: AttCtrl — zero error gives zero torque
+  tau = [0.00e+00, 0.00e+00, 0.00e+00]
+  ✓ PASS — zero torque when q_est == q_ref and omega == 0
+  ✓ PASS — q_err = identity
+
+Test 9: AttCtrl — proportional term drives q_err to zero
+  q_err[1] = -0.049979 (expect ~-0.0500)
+  tau[0] = -0.000100 (expect Kp*q_err[1] = -0.000100)
+  ✓ PASS — tau[0] = Kp * q_err[1] (proportional term)
+  ✓ PASS — tau[1] = 0 (no y/z error)
+  ✓ PASS — tau[2] = 0 (no y/z error)
+
+=== ALL PASS (0 failures) ===
+=== Mode Manager C Verification ===
+
+Test 1: Init state is DETUMBLE
+  FSW ModeManager initialised — starting in DETUMBLE
+  ✓ PASS — mode == DETUMBLE after init
+  mode = DETUMBLE
+
+Test 2: High angular rate triggers SAFE_MODE
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [    0.0s] DETUMBLE             -> SAFE_MODE
+  ✓ PASS — rate > threshold → SAFE_MODE
+  mode = SAFE_MODE
+
+Test 3: Rate below threshold → DETUMBLE exits to SUN_ACQUISITION
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [  100.0s] DETUMBLE             -> SUN_ACQUISITION
+  ✓ PASS — low rate exits DETUMBLE → SUN_ACQUISITION
+  mode = SUN_ACQUISITION
+
+Test 4: QUEST error < threshold → SUN_ACQ → FINE_POINTING
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [   10.0s] SUN_ACQUISITION      -> FINE_POINTING
+  ✓ PASS — quest_err < 15° → FINE_POINTING
+  mode = FINE_POINTING
+
+Test 5: SUN_ACQ timeout (600s) forces FINE_POINTING
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW: Sun acq timeout at t=700.0s — proceeding with q_exit seed
+  FSW [  700.0s] SUN_ACQUISITION      -> FINE_POINTING
+  ✓ PASS — timeout → FINE_POINTING
+  mode = FINE_POINTING
+
+Test 6: Wheel saturation → MOMENTUM_DUMP (when pointing ok)
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [  500.0s] FINE_POINTING        -> MOMENTUM_DUMP
+  ✓ PASS — h > DUMP_TRIGGER → MOMENTUM_DUMP
+  mode = MOMENTUM_DUMP  h_max=3.5
+
+Test 7: Wheels dumped → MOMENTUM_DUMP exits to FINE_POINTING
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [  600.0s] MOMENTUM_DUMP        -> FINE_POINTING
+  ✓ PASS — h < DUMP_COMPLETE → FINE_POINTING
+  mode = FINE_POINTING
+
+Test 8: MOMENTUM_DUMP blocked when pointing_err > 5°
+  FSW ModeManager initialised — starting in DETUMBLE
+  ✓ PASS — dump blocked when pointing_err > guard
+  mode = FINE_POINTING  (dump prevented)
+
+Test 9: SAFE_MODE recovers to DETUMBLE when rate drops
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [   10.0s] SAFE_MODE            -> DETUMBLE
+  ✓ PASS — SAFE_MODE recovers → DETUMBLE
+  mode = DETUMBLE
+
+Test 10: Full sequence DETUMBLE → SUN_ACQ → FINE_POINTING
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [   76.0s] DETUMBLE             -> SUN_ACQUISITION
+  After 200s: mode=SUN_ACQUISITION  rate=0.080 deg/s
+  FSW [  201.0s] SUN_ACQUISITION      -> FINE_POINTING
+  After QUEST: mode=FINE_POINTING
+  ✓ PASS — reaches FINE_POINTING after full sequence
+  Transition log:
+    t=76.0s → SUN_ACQUISITION
+    t=201.0s → FINE_POINTING
+  ✓ PASS — at least 2 transitions logged
+
+=== ALL PASS (0 failures) ===
+=== Lambert Solver C Verification ===
+
+Test 1: Circular LEO — quarter-orbit velocity accuracy
+  ok = 1
+  v1 error: 0.000000 m/s
+  v2 error: 0.000000 m/s
+  ✓ PASS — solution found
+  ✓ PASS — v1 error < 10 mm/s (< 0.01 m/s)
+  ✓ PASS — v2 error < 10 mm/s
+
+Test 2: GEO 1km catch-up — minimum ΔV < 15 mm/s
+  Best TOF: 21.54 hr  (90% of orbit)
+  |dv1| = 4.376 mm/s
+  |dv2| = 4.376 mm/s
+  Total = 8.751 mm/s
+  ✓ PASS — total ΔV < 100 mm/s  (expect ~8-15 mm/s)
+  ✓ PASS — total ΔV < 15 mm/s
+
+Test 3: Keplerian propagator — 1 GEO orbit radius drift
+  Radius drift after 1 GEO orbit: 6.97 m
+  ✓ PASS — drift < 1000 m after full GEO orbit
+
+Test 4: LAMBERT_min_dv wrapper — GEO 500m catch-up
+  ok = 1  total_dv = 18.078 mm/s
+  ✓ PASS — min_dv wrapper finds a solution
+  ✓ PASS — total ΔV < 100 mm/s
+
+Test 5: Degenerate geometry (r1 == r2) returns ok=0
+  ok = 0  (expect 0)
+  ✓ PASS — degenerate case returns ok=0 (no crash)
+
+=== ALL PASS (0 failures) ===
+=== Chief Pose Estimator C Verification ===
+
+Test 1: Init — quaternion is unit norm
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  |q| = 1.00000000
+  ✓ PASS — |q| = 1.0 after init
+
+Test 2: Init — P diagonal is positive
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  ✓ PASS — all diagonal P elements > 0
+  P[0][0]=0.2742  P[3][3]=0.007615
+
+Test 3: Predict — quaternion stays unit norm after 200 steps
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  |q| after 200 steps = 1.00000000
+  ✓ PASS — |q| = 1.0 ± 1e-5 after 200 predict steps
+
+Test 4: Covariance stays symmetric after predict/update
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  ✓ PASS — P is symmetric after 100 steps
+  ✓ PASS — P diagonal is positive after 100 steps
+
+Test 5: valid flag set after >= 10 successful PnP updates
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  valid after 10 updates=1
+  ✓ PASS — valid=1 reached within 200 steps at 2m range
+
+Test 6: Omega uncertainty decreases with successful updates
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  omega_uncertainty: init=0.0873  after=0.0018 rad/s
+  ✓ PASS — omega uncertainty decreases after updates
+
+Test 7: Far range (10km) — update_count stays 0
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  update_count = 0  (expect 0)
+  ✓ PASS — no PnP updates beyond max_range
+  ✓ PASS — valid=0 beyond max_range
+
+Test 8: CPE_get_R_body2lvlh returns 0 before first PnP
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  has_R_b2l = 0  (expect 0)
+  ✓ PASS — CPE_get_R_body2lvlh returns 0 before any PnP
+  has_R_b2l after 50 steps = 1
+  (1 = PnP succeeded at least once; 0 = all attempts failed)
+
+=== ALL PASS (0 failures) ===
+
+=== Running Python SIL comparison ===
+[wrapper] C library loaded OK -> C:\Users\Venkat\OneDrive\Desktop\appex\Satellite_GNC\gnc_lib.dll
+==========================================================
+  SIL Verification: Python TH-EKF  vs  C TH-EKF
+==========================================================
+
+  Running 360 predict/update steps (3600s) �
+  TH-EKF: a=42164km, e=0.0010, T=23.93hr, n=15.0412deg/hr
+
+  State divergence after 360 steps:
+    PASS dx [m]        err=5.08e-11  (thr=1e-04)  py=+170.931355  c=+170.931355
+    PASS dy [m]        err=1.84e-11  (thr=1e-04)  py=+710.659190  c=+710.659190
+    PASS dz [m]        err=3.40e-11  (thr=1e-04)  py=-149.667602  c=-149.667602
+    PASS dvx[m/s]      err=9.30e-16  (thr=1e-07)  py=+0.064125  c=+0.064125
+    PASS dvy[m/s]      err=2.55e-14  (thr=1e-07)  py=+0.046845  c=+0.046845
+    PASS dvz[m/s]      err=2.13e-14  (thr=1e-07)  py=-0.039869  c=-0.039869
+
+  Covariance max element error: 1.25e-14  (thr=1e-06)  PASS
+
+==========================================================
+  PASS  ALL PASS -- C EKF matches Python golden model
+==========================================================
+
+=== Running Real-Time SIL verification ===
+============================================================
+  Real-Time SIL Verification Suite
+  C Flight Loop -- PC SIL (no STM32 needed)
+============================================================
+
+Test 1: Nominal -- timing + EKF convergence
+    3600 ticks wall time : 122.9ms  (100 Hz realtime = 36000ms)
+    Max loop time        : 0.0369ms  (deadline 10.0ms)
+    Missed deadlines     : 0
+    Final pos std        : [0.09 0.04 0.09] m
+    PASS PASS -- max loop time < 10.0ms
+    PASS PASS -- zero missed deadlines in batch SIL
+    PASS PASS -- EKF position std < 50.0m after 36s
+    Timing margin        : 271x budget  (strong evidence)
+
+Test 2: Range sensor dropout (ticks 1000-1200, ~20s)
+    Range dropped for   : 20 guidance ticks
+    PASS PASS -- no range updates during dropout period
+    Pos std pre-dropout : [0.17 0.06 0.17]
+    Pos std max during  : [0.23 0.08 0.23]
+    PASS PASS -- EKF std < 200.0m during dropout (dead-reckoning holds)
+    Pos std post-recover: [0.13 0.05 0.13]
+    PASS PASS -- EKF re-converges after range sensor recovers
+
+Test 3: Camera spike rejection
+    EKF pos at spike tick: [-0.000e+00  7.999e+01 -1.000e-02] m
+    EKF range at spike   : 79.99 m
+    PASS PASS -- EKF x-state < 9000.0m after spike (spike rejected)
+    PASS PASS -- EKF range not corrupted by spike
+    PASS PASS -- Position uncertainty unaffected by rejected spike
+
+Test 4: Gyro bias step -- MEKF recovery
+    Injected bias step : 5.0 mrad/s (all axes)
+    MEKF bias estimate : [3.987 3.103 4.199] mrad/s
+    Bias estimate err  : 2.295 mrad/s
+    PASS PASS -- MEKF bias error < 5 mrad/s after step
+    Max quaternion norm error: 1.10e-07
+    PASS PASS -- Quaternion stays unit norm throughout bias step
+
+============================================================
+  PASS  ALL PASS (11/11)
+  C navigation stack: fixed-rate SIL loop with
+  bounded execution time and sensor dropout testing.
+============================================================
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW ModeManager initialised — starting in DETUMBLE
+  flight_loop v2: full ADCS stack enabled
+  FSW [    0.0s] DETUMBLE             -> SUN_ACQUISITION
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW ModeManager initialised — starting in DETUMBLE
+  flight_loop v2: full ADCS stack enabled
+  FSW [    0.0s] DETUMBLE             -> SUN_ACQUISITION
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW ModeManager initialised — starting in DETUMBLE
+  flight_loop v2: full ADCS stack enabled
+  FSW [    0.0s] DETUMBLE             -> SUN_ACQUISITION
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW ModeManager initialised — starting in DETUMBLE
+  flight_loop v2: full ADCS stack enabled
+  FSW [    0.0s] DETUMBLE             -> SUN_ACQUISITION
+
+=== Running Closed-Loop SIL verification ===
+
+=== ALL PASS ===

@@ -1,14 +1,14 @@
 """
-verify_sil.py — Python golden model vs C TH-EKF
+verify_sil.py -- Python golden model vs C TH-EKF
 ================================================
 Run from Satellite_GNC root:  python sim_python/verify_sil.py
   (or via build.bat which calls exactly this)
 
 Root cause of previous failure:
   The flight sim uses a package layout:
-    flight sim/estimation/th_ekf.py    ← actual file
+    flight sim/estimation/th_ekf.py    <- actual file
   Not a flat layout:
-    flight sim/th_ekf.py               ← does NOT exist
+    flight sim/th_ekf.py               <- does NOT exist
 
   So the import must be:
     from estimation.th_ekf import THEKF
@@ -18,7 +18,7 @@ Root cause of previous failure:
 import sys
 import os
 
-# ── Path setup ────────────────────────────────────────────────────
+# -- Path setup ----------------------------------------------------
 # FLIGHT_SIM: parent of estimation/, control/, etc.
 # Adding it lets us do: from estimation.th_ekf import THEKF
 FLIGHT_SIM = r"C:\Users\Venkat\OneDrive\Desktop\appex\flight sim"
@@ -32,13 +32,13 @@ SIL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Insert SIL_ROOT first so 'from sim_python.wrapper import THEKF_C' resolves.
 # Insert FLIGHT_SIM after so 'from estimation.th_ekf import THEKF' resolves.
 # Using append instead of insert(0) for FLIGHT_SIM means SIL local modules
-# always win, and flight sim modules are found as a fallback — clean separation.
+# always win, and flight sim modules are found as a fallback -- clean separation.
 if SIL_ROOT not in sys.path:
     sys.path.insert(0, SIL_ROOT)
 if FLIGHT_SIM not in sys.path:
     sys.path.append(FLIGHT_SIM)
 
-# ── Imports ───────────────────────────────────────────────────────
+# -- Imports -------------------------------------------------------
 import numpy as np
 
 # Golden model: Python THEKF from the flight sim.
@@ -62,21 +62,21 @@ except ImportError as e:
         print(f"\n  Fix: check your FLIGHT_SIM path in verify_sil.py line 20")
         sys.exit(1)
 
-# C wrapper — drop-in for THEKF
+# C wrapper -- drop-in for THEKF
 from sim_python.wrapper import THEKF_C
 
-# ── Test parameters ───────────────────────────────────────────────
+# -- Test parameters -----------------------------------------------
 MU    = 3.986004418e14
 A_GEO = 42164e3
 E_GEO = 0.001
 DT    = 10.0
 
-PASS_POS_M    = 1e-4    # m   — position divergence threshold
-PASS_VEL_MS   = 1e-7    # m/s — velocity divergence threshold
-PASS_COV      = 1e-6    # —   — covariance element divergence threshold
+PASS_POS_M    = 1e-4    # m   -- position divergence threshold
+PASS_VEL_MS   = 1e-7    # m/s -- velocity divergence threshold
+PASS_COV      = 1e-6    # --   -- covariance element divergence threshold
 
 
-# ── Run function (identical for both EKFs) ────────────────────────
+# -- Run function (identical for both EKFs) ------------------------
 def run(ekf, n_steps, x0):
     np.random.seed(42)
     P0 = np.diag([50.0**2]*3 + [0.5**2]*3)
@@ -102,14 +102,14 @@ def run(ekf, n_steps, x0):
     return ekf.x.copy(), ekf.P.copy()
 
 
-# ── Main ──────────────────────────────────────────────────────────
+# -- Main ----------------------------------------------------------
 def main():
     print("=" * 58)
     print("  SIL Verification: Python TH-EKF  vs  C TH-EKF")
     print("=" * 58)
 
     x0     = np.array([0., 500., 0., 0., 1e-3, 0.])
-    N      = 360    # 360 × 10s = 3600s = 1 GEO orbit
+    N      = 360    # 360 x 10s = 3600s = 1 GEO orbit
     labels = ['dx [m]', 'dy [m]', 'dz [m]',
               'dvx[m/s]', 'dvy[m/s]', 'dvz[m/s]']
 
@@ -122,7 +122,7 @@ def main():
         THEKF_C(a_chief=A_GEO, e_chief=E_GEO, mu=MU, dt=DT),
         N, x0)
 
-    # ── State divergence ─────────────────────────────────────────
+    # -- State divergence -----------------------------------------
     print(f"\n  State divergence after {N} steps:")
     state_ok = True
     for lbl, ep, ec in zip(labels, x_py, x_c):
@@ -131,23 +131,23 @@ def main():
         ok  = err < thresh
         if not ok:
             state_ok = False
-        mark = '✓' if ok else '✗'
+        mark = 'PASS' if ok else 'FAIL'
         print(f"    {mark} {lbl:<12}  err={err:.2e}  "
               f"(thr={thresh:.0e})  py={ep:+.6f}  c={ec:+.6f}")
 
-    # ── Covariance divergence ─────────────────────────────────────
+    # -- Covariance divergence -------------------------------------
     cov_err = abs(P_py - P_c).max()
     cov_ok  = cov_err < PASS_COV
     print(f"\n  Covariance max element error: {cov_err:.2e}  "
-          f"(thr={PASS_COV:.0e})  {'✓' if cov_ok else '✗'}")
+          f"(thr={PASS_COV:.0e})  {'PASS' if cov_ok else 'FAIL'}")
 
-    # ── Summary ───────────────────────────────────────────────────
+    # -- Summary ---------------------------------------------------
     all_ok = state_ok and cov_ok
     print("\n" + "=" * 58)
     if all_ok:
-        print("  ✓  ALL PASS — C EKF matches Python golden model")
+        print("  PASS  ALL PASS -- C EKF matches Python golden model")
     else:
-        print("  ✗  DIVERGENCE DETECTED — check output above")
+        print("  FAIL  DIVERGENCE DETECTED -- check output above")
     print("=" * 58)
 
     return 0 if all_ok else 1

@@ -1,12 +1,12 @@
 """
-verify_realtime_sil.py — Real-Time SIL Verification Suite
+verify_realtime_sil.py -- Real-Time SIL Verification Suite
 ==========================================================
 Runs the C flight loop through four scenarios and asserts pass criteria:
 
-  1. Nominal          — all sensors, verify EKF converges
-  2. Range dropout    — 200 ticks (~20 s) with no range sensor
-  3. Camera spike     — injected bad camera measurement, verify rejection
-  4. Gyro bias step   — bias jumps mid-flight, verify MEKF recovers
+  1. Nominal          -- all sensors, verify EKF converges
+  2. Range dropout    -- 200 ticks (~20 s) with no range sensor
+  3. Camera spike     -- injected bad camera measurement, verify rejection
+  4. Gyro bias step   -- bias jumps mid-flight, verify MEKF recovers
 
 Pass criteria match (and extend) verify_sil.py thresholds.
 
@@ -31,7 +31,7 @@ from sim_python.realtime_driver import (
 import ctypes
 import time
 
-# ── Pass thresholds ───────────────────────────────────────────────
+# -- Pass thresholds -----------------------------------------------
 MAX_LOOP_MS        = 10.0    # flight loop must finish in < 10ms
 MAX_MISSED         = 0       # zero missed deadlines in batch SIL
 POS_CONV_M         = 50.0    # EKF position std must drop below 50m
@@ -49,13 +49,13 @@ FAIL_TOTAL = 0
 
 def check(cond: bool, msg: str):
     global PASS_TOTAL, FAIL_TOTAL
-    mark = "✓ PASS" if cond else "✗ FAIL"
-    print(f"    {mark} — {msg}")
+    mark = "PASS PASS" if cond else "FAIL FAIL"
+    print(f"    {mark} -- {msg}")
     if cond: PASS_TOTAL += 1
     else:    FAIL_TOTAL += 1
 
 
-# ── Test helpers ──────────────────────────────────────────────────
+# -- Test helpers --------------------------------------------------
 
 def _run_batch(n_ticks: int, scenario: str, dll: FlightLoopDLL,
                x0: np.ndarray, P0: np.ndarray) -> list:
@@ -112,10 +112,10 @@ def _run_batch(n_ticks: int, scenario: str, dll: FlightLoopDLL,
     return log
 
 
-# ── Test 1: Nominal — timing and EKF convergence ─────────────────
+# -- Test 1: Nominal -- timing and EKF convergence -----------------
 
 def test_nominal(dll: FlightLoopDLL):
-    print("\nTest 1: Nominal — timing + EKF convergence")
+    print("\nTest 1: Nominal -- timing + EKF convergence")
     x0 = np.array([0., 500., 0., 0., 1e-3, 0.])
     P0 = np.diag([50.**2]*3 + [0.5**2]*3)
 
@@ -138,14 +138,14 @@ def test_nominal(dll: FlightLoopDLL):
           f"EKF position std < {POS_CONV_M}m after 36s")
 
     margin = MAX_LOOP_MS / max(max_loop, 1e-9)
-    print(f"    Timing margin        : {margin:.0f}× budget  "
+    print(f"    Timing margin        : {margin:.0f}x budget  "
           f"({'strong evidence' if margin > 5 else 'marginal'})")
 
 
-# ── Test 2: Range sensor dropout ─────────────────────────────────
+# -- Test 2: Range sensor dropout ---------------------------------
 
 def test_range_dropout(dll: FlightLoopDLL):
-    print("\nTest 2: Range sensor dropout (ticks 1000–1200, ~20s)")
+    print("\nTest 2: Range sensor dropout (ticks 1000-1200, ~20s)")
     x0 = np.array([0., 500., 0., 0., 1e-3, 0.])
     P0 = np.diag([50.**2]*3 + [0.5**2]*3)
 
@@ -182,7 +182,7 @@ def test_range_dropout(dll: FlightLoopDLL):
               "EKF re-converges after range sensor recovers")
 
 
-# ── Test 3: Camera spike rejection ───────────────────────────────
+# -- Test 3: Camera spike rejection -------------------------------
 
 def test_camera_spike(dll: FlightLoopDLL):
     print("\nTest 3: Camera spike rejection")
@@ -194,7 +194,7 @@ def test_camera_spike(dll: FlightLoopDLL):
     # Find the row at tick 500 (spike tick)
     spike_rows = [r for r in log if r["tick"] == 500]
     if not spike_rows:
-        print("    (spike row not found in log — may be filtered)")
+        print("    (spike row not found in log -- may be filtered)")
         check(True, "spike tick skipped in guidance log")
         return
 
@@ -213,10 +213,10 @@ def test_camera_spike(dll: FlightLoopDLL):
           "Position uncertainty unaffected by rejected spike")
 
 
-# ── Test 4: Gyro bias step ────────────────────────────────────────
+# -- Test 4: Gyro bias step ----------------------------------------
 
 def test_gyro_bias(dll: FlightLoopDLL):
-    print("\nTest 4: Gyro bias step — MEKF recovery")
+    print("\nTest 4: Gyro bias step -- MEKF recovery")
     x0 = np.array([0., 500., 0., 0., 1e-3, 0.])
     P0 = np.diag([50.**2]*3 + [0.5**2]*3)
 
@@ -270,12 +270,12 @@ def test_gyro_bias(dll: FlightLoopDLL):
     check(bool(max_q_err < 1e-5), "Quaternion stays unit norm throughout bias step")
 
 
-# ── Main ──────────────────────────────────────────────────────────
+# -- Main ----------------------------------------------------------
 
 def main():
     print("=" * 60)
     print("  Real-Time SIL Verification Suite")
-    print("  C Flight Loop — PC SIL (no STM32 needed)")
+    print("  C Flight Loop -- PC SIL (no STM32 needed)")
     print("=" * 60)
 
     try:
@@ -292,11 +292,11 @@ def main():
     print("\n" + "=" * 60)
     total = PASS_TOTAL + FAIL_TOTAL
     if FAIL_TOTAL == 0:
-        print(f"  ✓  ALL PASS ({PASS_TOTAL}/{total})")
+        print(f"  PASS  ALL PASS ({PASS_TOTAL}/{total})")
         print("  C navigation stack: fixed-rate SIL loop with")
         print("  bounded execution time and sensor dropout testing.")
     else:
-        print(f"  ✗  {FAIL_TOTAL} FAILURES  ({PASS_TOTAL}/{total} passed)")
+        print(f"  FAIL  {FAIL_TOTAL} FAILURES  ({PASS_TOTAL}/{total} passed)")
     print("=" * 60)
 
     return 0 if FAIL_TOTAL == 0 else 1

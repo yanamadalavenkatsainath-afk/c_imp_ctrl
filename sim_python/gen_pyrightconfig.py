@@ -9,10 +9,10 @@ import json
 import pathlib
 import os
 
-# Resolve paths relative to this script's location (sim_python/) → repo root
-_HERE    = pathlib.Path(__file__).resolve().parent        # sim_python/
-_SIL_ROOT = _HERE.parent                                  # Satellite_GNC/
-_FLIGHT_SIM = _SIL_ROOT.parent / "flight sim"            # ../flight sim/
+# Resolve paths relative to this script's location (sim_python/) -> repo root
+_HERE     = pathlib.Path(__file__).resolve().parent        # sim_python/
+_SIL_ROOT = _HERE.parent                                   # Satellite_GNC/
+_FLIGHT_SIM = _SIL_ROOT.parent / "flight sim"             # ../flight sim/
 
 cfg = {
     "pythonVersion": "3.11",
@@ -26,8 +26,18 @@ cfg = {
         "**/node_modules",
         "**/__pycache__"
     ],
-    "reportMissingImports": "warning",
+    # Suppress squiggles for flight sim modules (cw_dynamics, spacecraft, etc.)
+    # Resolved at runtime via sys.path; Pylance cannot index them because
+    # "flight sim/" has no py.typed marker or stubs.
+    "reportMissingImports": "none",
     "reportMissingModuleSource": "none",
+    "reportUnknownMemberType": "none",
+    "reportUnknownVariableType": "none",
+    "reportUnknownArgumentType": "none",
+    "useLibraryCodeForTypes": True,
+    "ignore": [
+        str(_FLIGHT_SIM).replace("\\", "/"),
+    ],
 }
 
 out = _SIL_ROOT / "pyrightconfig.json"

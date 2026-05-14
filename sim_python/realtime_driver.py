@@ -1,5 +1,5 @@
 """
-realtime_driver.py — Python ctypes driver for C SIL flight loop
+realtime_driver.py -- Python ctypes driver for C SIL flight loop
 ================================================================
 Feeds simulated sensor packets to the C flight loop DLL at 100 Hz
 and collects CommandFrame telemetry into a structured log.
@@ -10,7 +10,7 @@ Usage (from Satellite_GNC root):
 Requires: gnc_lib.dll compiled with flight_loop.c included (see build.bat).
 
 Architecture:
-    Python sim   →  SensorFrame*  →  flight_loop_step()  →  CommandFrame*
+    Python sim   ->  SensorFrame*  ->  flight_loop_step()  ->  CommandFrame*
     (fills fields)                  (C processes 10ms tick)  (Python reads)
 """
 
@@ -24,12 +24,12 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import Optional, List
 
-# ── DLL path ─────────────────────────────────────────────────────
+# -- DLL path -----------------------------------------------------
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 _DLL_PATH = os.path.join(_ROOT, "gnc_lib.dll")
 
-# ── ctypes struct mirrors of C headers ───────────────────────────
+# -- ctypes struct mirrors of C headers ---------------------------
 
 class GyroPacket(ctypes.Structure):
     _fields_ = [
@@ -55,6 +55,14 @@ class CameraPacket(ctypes.Structure):
         ("_pad",     ctypes.c_uint8 * 7),
     ]
 
+class PortPacket(ctypes.Structure):
+    _fields_ = [
+        ("port_lvlh", ctypes.c_double * 3),
+        ("R_diag",    ctypes.c_double * 3),
+        ("valid",     ctypes.c_uint8),
+        ("_pad",      ctypes.c_uint8 * 7),
+    ]
+
 class MagPacket(ctypes.Structure):
     _fields_ = [
         ("body",     ctypes.c_double * 3),
@@ -76,6 +84,7 @@ class SensorFrame(ctypes.Structure):
         ("gyro",        GyroPacket),
         ("range",       RangePacket),
         ("camera",      CameraPacket),
+        ("port",        PortPacket),
         ("mag",         MagPacket),
         ("sun",         SunPacket),
         ("sim_tick",    ctypes.c_uint64),
@@ -127,7 +136,7 @@ class CommandFrame(ctypes.Structure):
         ("_pad",        ctypes.c_uint8 * 7),
     ]
 
-# ── Telemetry log row ────────────────────────────────────────────
+# -- Telemetry log row --------------------------------------------
 @dataclass
 class TelRow:
     tick:          int
@@ -143,7 +152,7 @@ class TelRow:
     camera_valid:  bool
     gyro_valid:    bool
 
-# ── DLL wrapper ──────────────────────────────────────────────────
+# -- DLL wrapper --------------------------------------------------
 class FlightLoopDLL:
     GUIDANCE_MODES = {0: "PROX_OPS", 1: "TERMINAL", 2: "DOCKED",
                       3: "LOST_TARGET", 4: "FORMATION_HOLD"}
@@ -212,7 +221,7 @@ class FlightLoopDLL:
         return np.array(list(x_buf)), np.array(list(P_buf)).reshape(6, 6)
 
 
-# ── Fake sensor generator ─────────────────────────────────────── 
+# -- Fake sensor generator --------------------------------------- 
 class FakeSensorSim:
     """
     Minimal closed-loop sim: propagates CW relative motion,
@@ -281,7 +290,7 @@ class FakeSensorSim:
         self._cw_step(accel_cmd)
         sf = SensorFrame()
 
-        # ── Gyro (100 Hz) ────────────────────────────
+        # -- Gyro (100 Hz) ----------------------------
         if not self.gyro_dropout:
             omega_true = np.array([0.001, 0.0005, -0.0003])
             noise = self.rng.standard_normal(3) * 1e-4
@@ -291,7 +300,7 @@ class FakeSensorSim:
         else:
             sf.gyro.valid = 0
 
-        # ── 10 Hz sensors: range, camera, magnetometer ───────────
+        # -- 10 Hz sensors: range, camera, magnetometer -----------
         if self.tick % 10 == 0:
             dr  = self.x[:3]
             rng = np.linalg.norm(dr)
@@ -316,7 +325,7 @@ class FakeSensorSim:
             else:
                 sf.camera.valid = 0
 
-            # Magnetometer — needed for MEKF bias estimation.
+            # Magnetometer -- needed for MEKF bias estimation.
             # z_body = Rb(q_true)^T @ v_inertial + noise
             # where Rb is built from the true attitude quaternion.
             # This gives a real observation signal so the MEKF can
@@ -342,7 +351,7 @@ class FakeSensorSim:
         return sf
 
 
-# ── Main SIL driver ───────────────────────────────────────────────
+# -- Main SIL driver -----------------------------------------------
 def run_sil(n_ticks: int = 3600,
             scenario: str = "nominal",
             verbose: bool = True) -> List[TelRow]:
@@ -351,10 +360,10 @@ def run_sil(n_ticks: int = 3600,
     Returns list of TelRow for post-processing.
 
     Scenarios:
-      "nominal"        — all sensors valid
-      "range_dropout"  — range drops out at tick 1000-1200
-      "camera_spike"   — camera sends bad spike at tick 500
-      "gyro_bias"      — gyro bias jumps at tick 800
+      "nominal"        -- all sensors valid
+      "range_dropout"  -- range drops out at tick 1000-1200
+      "camera_spike"   -- camera sends bad spike at tick 500
+      "gyro_bias"      -- gyro bias jumps at tick 800
     """
     MU    = 3.986004418e14
     A_GEO = 42164e3
@@ -376,12 +385,12 @@ def run_sil(n_ticks: int = 3600,
 
     if verbose:
         print(f"\n{'='*60}")
-        print(f"  SIL Real-Time Driver  —  scenario: {scenario}")
+        print(f"  SIL Real-Time Driver  --  scenario: {scenario}")
         print(f"  {n_ticks} ticks @ 100 Hz = {n_ticks/100:.1f}s sim time")
         print(f"{'='*60}")
 
     for tick in range(n_ticks):
-        # ── Dropout injection ──────────────────────
+        # -- Dropout injection ----------------------
         sim.range_dropout  = False
         sim.camera_dropout = False
         sim.gyro_dropout   = False
@@ -393,7 +402,7 @@ def run_sil(n_ticks: int = 3600,
         elif scenario == "gyro_bias" and tick >= 800:
             pass  # handled in sensor frame overwrite below
 
-        # ── Generate fake sensor frame ─────────────
+        # -- Generate fake sensor frame -------------
         sf_py = sim.generate_frame(last_accel)
 
         # Gyro bias jump injection
@@ -406,19 +415,19 @@ def run_sil(n_ticks: int = 3600,
             sf_py.camera.valid = 1
             sf_py.camera.pos_lvlh[0] = 9999.0   # blatant spike
 
-        # ── Copy into DLL sensor frame ─────────────
+        # -- Copy into DLL sensor frame -------------
         dll_sf = dll.get_sensor_frame()
         ctypes.memmove(dll_sf.contents, ctypes.addressof(sf_py),  # type: ignore[arg-type]
                        ctypes.sizeof(SensorFrame))
 
-        # ── Step C flight loop ─────────────────────
+        # -- Step C flight loop ---------------------
         cf_ptr = dll.step()
         cf = cf_ptr.contents
 
-        # ── Harvest command for next sim step ─────
+        # -- Harvest command for next sim step -----
         last_accel = np.array(list(cf.cmd.accel_lvlh))
 
-        # ── Log ───────────────────────────────────
+        # -- Log -----------------------------------
         if tick % 10 == 0:   # log at 10 Hz (guidance rate)
             row = TelRow(
                 tick          = tick,
@@ -446,7 +455,7 @@ def run_sil(n_ticks: int = 3600,
               f"(deadline {cf.timing.deadline_ms:.1f}ms)")
         print(f"  Missed   : {cf.timing.missed_deadlines} deadlines")
         print(f"  EKF pos  : {list(np.round(cf.nav.pos_lvlh, 2))} m")
-        print(f"  Accel    : {list(np.round(cf.cmd.accel_lvlh, 5))} m/s²")
+        print(f"  Accel    : {list(np.round(cf.cmd.accel_lvlh, 5))} m/s2")
         mode = FlightLoopDLL.GUIDANCE_MODES.get(cf.cmd.fsw_mode, "?")
         print(f"  Mode     : {mode}")
 

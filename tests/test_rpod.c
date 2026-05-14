@@ -167,14 +167,15 @@ static void test_terminal_decel(void) {
 
 
 /* ── Test 5: TERMINAL — docking condition ───────────────────────
-   At range < 0.05m RPOD_terminal returns 1 (docked).            */
+   At range < RPOD_DOCK_DONE_M RPOD_terminal returns 2 (docked). */
 static void test_terminal_docking(void) {
-    printf("\nTest 5: TERMINAL docking detection at range < 5cm\n");
+    printf("\nTest 5: TERMINAL docking detection at range < %.0fcm\n",
+           RPOD_DOCK_DONE_M * 100.0);
 
     double accel_max = 0.020;
 
     RPOD_State state;
-    state.pos[0] = 0.03;   /* 3cm — below 5cm dock gate */
+    state.pos[0] = 0.15;   /* below dock gate */
     state.pos[1] = 0.0;
     state.pos[2] = 0.0;
     state.vel[0] = -0.001;
@@ -184,15 +185,15 @@ static void test_terminal_docking(void) {
     double accel[3];
     int ret = RPOD_terminal_simple(&state, accel_max, accel);
 
-    CHECK(ret == 2, "TERMINAL returns 2 (docked) when range < 5cm");
+    CHECK(ret == 2, "TERMINAL returns 2 (docked) when range < dock gate");
     CHECK(norm3(accel) < 1e-9, "zero accel output when docked");
     printf("  ret = %d  |accel| = %.2e\n", ret, norm3(accel));
 }
 
 
-/* ── Test 6: PROX_OPS — deadband at range < 5cm ────────────────*/
+/* ── Test 6: PROX_OPS — deadband inside dock gate ─────────────*/
 static void test_prox_deadband(void) {
-    printf("\nTest 6: PROX_OPS deadband below 5cm\n");
+    printf("\nTest 6: PROX_OPS deadband below dock gate\n");
 
     double n_chief   = 7.292e-5;
     double accel_max = 0.020;

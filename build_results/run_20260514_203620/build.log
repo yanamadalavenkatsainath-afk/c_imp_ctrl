@@ -1,0 +1,1604 @@
+=== Ensuring Python package structure in flight sim ===
+  OK: estimation\__init__.py exists 
+
+=== Generating pyrightconfig.json ===
+  Written: C:\Users\Venkat\OneDrive\Desktop\appex\Satellite_GNC\pyrightconfig.json
+
+=== Compiling GNC library (full stack) ===
+Built: gnc_lib.dll
+
+=== Compiling flight_loop standalone smoke test ===
+
+=== Compiling unit tests ===
+
+=== Running flight_loop smoke test ===
+Flight loop v2 standalone smoke test
+  FSW ModeManager initialised — starting in DETUMBLE
+  flight_loop v2: full ADCS stack enabled
+  FSW [    1.2s] DETUMBLE             -> SUN_ACQUISITION
+  FSW [    1.2s] SUN_ACQUISITION      -> FINE_POINTING
+  Tick 299: fsw_mode=3 range=70.7m loop=0.000ms max=0.083ms missed=0
+  300 ticks in 0.29ms (avg 0.001ms/tick)
+  PASS
+
+=== Running C unit tests ===
+=== TH-EKF C Verification ===
+
+Test 1: PSE drift over 1 GEO orbit
+  Position drift after 1 GEO orbit: 0.1 m
+  ✓ PASS — drift < 200m (O(e) CW error for e=0.001)
+
+Test 2: EKF update reduces position std
+  ✓ PASS — position std reduced after 120 update steps
+
+Test 3: CW STM determinant ≈ 1 (symplecticity)
+  STM trace at nt=0.01: 5.9999  (valid range 2-8)
+  ✓ PASS — STM trace in valid range
+
+=== Done ===
+=== MEKF C Verification ===
+
+Test 1: Quaternion stays unit norm after 100 predict steps
+  Quaternion norm after 100 steps: 1.00000000
+  ✓ PASS — |q| = 1.0 ± 1e-5
+
+Test 2: Update with truth measurement — observable axes reduce
+  P[1][1] before: 0.010000   after: 1.00e-06
+  P[2][2] before: 0.010000   after: 1.00e-06
+  ✓ PASS — P[1][1] reduced (observable axis)
+  ✓ PASS — P[2][2] reduced (observable axis)
+  ✓ PASS — quaternion unchanged with zero innovation
+
+Test 3: Bias estimation — injected bias recovered
+  Bias error after 500 steps: 0.000500 rad/s
+  ✓ PASS — bias error < 2 mrad/s
+
+Test 4: Covariance stays symmetric after mixed predict/update
+  ✓ PASS — P is symmetric
+  ✓ PASS — P diagonal is positive
+
+=== Done ===
+=== RPOD Controller C Verification ===
+
+Test 1: PROX_OPS velocity profile selection
+  ✓ PASS — accel clamped to accel_max at 307m
+  ✓ PASS — accel points toward chief (+y)
+  accel = [-0.0000, 0.0200, -0.0000] m/s²
+
+Test 2: PROX_OPS closing speed at 50m (sqrt law)
+  ✓ PASS — accel_x = -K_SQRT*sqrt(50)/TAU (sqrt law at 50m)
+  accel[0] = -0.01265  expected -0.01265
+
+Test 3: PROX_OPS → TERMINAL handoff at range < 0.8m
+  ✓ PASS — PROX_OPS delegates to TERMINAL for range < 0.8m
+  prox=[-0.01218,0.00000,0.00000]  term=[-0.01218,0.00000,0.00000]
+
+Test 4: TERMINAL sqrt-law deceleration at 40cm
+  ✓ PASS — accel ≈ 0 when already at desired closing speed
+  ✓ PASS — returns 0 (not docked) at 40cm
+  v_des=0.03536 m/s  |accel| = 0.00e+00 m/s²
+
+Test 5: TERMINAL docking detection at range < 5cm
+  ✓ PASS — TERMINAL returns 2 (docked) when range < 5cm
+  ✓ PASS — zero accel output when docked
+  ret = 2  |accel| = 0.00e+00
+
+Test 6: PROX_OPS deadband below 5cm
+  ✓ PASS — zero accel inside docking zone (terminal path)
+
+Test 7: TERMINAL speed capped at VMAX=5mm/s
+  ✓ PASS — k*range > VMAX — cap is needed at 2m
+  ✓ PASS — accel ≈ 0 when already at VMAX closing speed
+  vel_des_mag = 0.1118  VMAX = 0.0500  |accel| = 0.00e+00
+
+=== ALL PASS (0 failures) ===
+=== QUEST C Verification ===
+
+Test 1: Identity attitude (q=[1,0,0,0])
+  q=[1.000000,0.000000,0.000000,0.000000]  quality=0.5000
+  ✓ PASS — w≈1 for identity attitude (within 0.02)
+  ✓ PASS — x≈0 for identity attitude (within 0.02)
+  ✓ PASS — y≈0 for identity attitude (within 0.02)
+  ✓ PASS — quality > threshold
+
+Test 2: Known 30° x-rotation, no noise
+  Attitude error: 0.0000°  quality=0.7000
+  ✓ PASS — attitude error < 1° for known 30° rotation
+  ✓ PASS — quality > threshold
+
+Test 3: Noisy measurements (sigma=5mrad)
+  Attitude error: 12.9068°  quality=0.9991
+  ✓ PASS — attitude error < 20° under 5mrad noise (bounded, not catastrophic)
+  ✓ PASS — quality > threshold under noise
+
+Test 4: Degenerate geometry — parallel reference vectors
+  (TRIAD hard-fails here; QUEST degrades gracefully)
+  quality=0.5197  ok=1
+  ✓ PASS — quaternion stays unit norm (no NaN/crash)
+  (quality 0.5197; well-conditioned geometry gives >0.9)
+  ✓ PASS — quality < 0.999 for nearly-parallel geometry
+
+Test 5: 3-vector QUEST (mag + sun + nadir)
+  Attitude error: 0.0001°  quality=0.9716
+  ✓ PASS — 3-vector error < 1°
+  ✓ PASS — 3-vector quality > 0.5
+
+Test 6: QUEST_nadir_inertial helper
+  nadir=[-1.0000,-0.0000,-0.0000]
+  ✓ PASS — nadir points toward -x
+  ✓ PASS — nadir y=0
+  ✓ PASS — nadir z=0
+
+=== ALL PASS (0 failures) ===
+=== ADCS C Verification ===
+
+Test 1: B-dot — zero angular rate gives zero dipole
+  |m_cmd| = 0.00e+00 A·m²
+  ✓ PASS — zero dipole when omega=0
+
+Test 2: B-dot — torque opposes angular rate
+  m_cmd = [0.0000, 0.0000, 300.0000] A·m²
+  torque= [-6.00e-03, 0.00e+00, 0.00e+00] N·m
+  ✓ PASS — non-zero dipole when omega and B non-parallel
+  ✓ PASS — dipole clipped to m_max
+
+Test 3: B-dot — dipole clips at m_max
+  ✓ PASS — each dipole component ≤ m_max
+  ✓ PASS — each dipole component ≤ m_max
+  ✓ PASS — each dipole component ≤ m_max
+  m_cmd = [0.0000, 0.0000, 0.0000] (m_max=300.00)
+
+Test 4: Reaction wheel — momentum integrates correctly
+  h   = [0.001000, -0.000500, 0.000200] N·m·s
+  exp = [0.001000, -0.000500, 0.000200]
+  ✓ PASS — h[i] matches tau*dt*steps
+  ✓ PASS — h[i] matches tau*dt*steps
+  ✓ PASS — h[i] matches tau*dt*steps
+
+Test 5: Reaction wheel — momentum clips at h_max
+  h[0] = 4.00000  h_max = 4.000
+  ✓ PASS — h[0] saturates at h_max
+  ✓ PASS — h[1] = 0 (no torque applied)
+
+Test 6: MTQ — momentum dump dipole direction
+  m = [-0.0000, -0.0000, -0.4000]
+  ✓ PASS — m[0] ≈ 0 (h×B has no x component)
+  ✓ PASS — m[1] ≈ 0 (h×B has no y component)
+  ✓ PASS — m[2] < 0 (dumps h in correct direction)
+  ✓ PASS — dipole clipped to m_max
+
+Test 7: MTQ — torque = m × B
+  tau = [0.00e+00, 0.00e+00, 2.00e-06]
+  ✓ PASS — tau[0] = 0
+  ✓ PASS — tau[1] = 0
+  ✓ PASS — tau[2] = m[0]*B[1] = 2e-6 N·m
+
+Test 8: AttCtrl — zero error gives zero torque
+  tau = [0.00e+00, 0.00e+00, 0.00e+00]
+  ✓ PASS — zero torque when q_est == q_ref and omega == 0
+  ✓ PASS — q_err = identity
+
+Test 9: AttCtrl — proportional term drives q_err to zero
+  q_err[1] = -0.049979 (expect ~-0.0500)
+  tau[0] = -0.000100 (expect Kp*q_err[1] = -0.000100)
+  ✓ PASS — tau[0] = Kp * q_err[1] (proportional term)
+  ✓ PASS — tau[1] = 0 (no y/z error)
+  ✓ PASS — tau[2] = 0 (no y/z error)
+
+=== ALL PASS (0 failures) ===
+=== Mode Manager C Verification ===
+
+Test 1: Init state is DETUMBLE
+  FSW ModeManager initialised — starting in DETUMBLE
+  ✓ PASS — mode == DETUMBLE after init
+  mode = DETUMBLE
+
+Test 2: High angular rate triggers SAFE_MODE
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [    0.0s] DETUMBLE             -> SAFE_MODE
+  ✓ PASS — rate > threshold → SAFE_MODE
+  mode = SAFE_MODE
+
+Test 3: Rate below threshold → DETUMBLE exits to SUN_ACQUISITION
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [  100.0s] DETUMBLE             -> SUN_ACQUISITION
+  ✓ PASS — low rate exits DETUMBLE → SUN_ACQUISITION
+  mode = SUN_ACQUISITION
+
+Test 4: QUEST error < threshold → SUN_ACQ → FINE_POINTING
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [   10.0s] SUN_ACQUISITION      -> FINE_POINTING
+  ✓ PASS — quest_err < 15° → FINE_POINTING
+  mode = FINE_POINTING
+
+Test 5: SUN_ACQ timeout (600s) forces FINE_POINTING
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW: Sun acq timeout at t=700.0s — proceeding with q_exit seed
+  FSW [  700.0s] SUN_ACQUISITION      -> FINE_POINTING
+  ✓ PASS — timeout → FINE_POINTING
+  mode = FINE_POINTING
+
+Test 6: Wheel saturation → MOMENTUM_DUMP (when pointing ok)
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [  500.0s] FINE_POINTING        -> MOMENTUM_DUMP
+  ✓ PASS — h > DUMP_TRIGGER → MOMENTUM_DUMP
+  mode = MOMENTUM_DUMP  h_max=3.5
+
+Test 7: Wheels dumped → MOMENTUM_DUMP exits to FINE_POINTING
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [  600.0s] MOMENTUM_DUMP        -> FINE_POINTING
+  ✓ PASS — h < DUMP_COMPLETE → FINE_POINTING
+  mode = FINE_POINTING
+
+Test 8: MOMENTUM_DUMP blocked when pointing_err > 5°
+  FSW ModeManager initialised — starting in DETUMBLE
+  ✓ PASS — dump blocked when pointing_err > guard
+  mode = FINE_POINTING  (dump prevented)
+
+Test 9: SAFE_MODE recovers to DETUMBLE when rate drops
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [   10.0s] SAFE_MODE            -> DETUMBLE
+  ✓ PASS — SAFE_MODE recovers → DETUMBLE
+  mode = DETUMBLE
+
+Test 10: Full sequence DETUMBLE → SUN_ACQ → FINE_POINTING
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW [   76.0s] DETUMBLE             -> SUN_ACQUISITION
+  After 200s: mode=SUN_ACQUISITION  rate=0.080 deg/s
+  FSW [  201.0s] SUN_ACQUISITION      -> FINE_POINTING
+  After QUEST: mode=FINE_POINTING
+  ✓ PASS — reaches FINE_POINTING after full sequence
+  Transition log:
+    t=76.0s → SUN_ACQUISITION
+    t=201.0s → FINE_POINTING
+  ✓ PASS — at least 2 transitions logged
+
+=== ALL PASS (0 failures) ===
+=== Lambert Solver C Verification ===
+
+Test 1: Circular LEO — quarter-orbit velocity accuracy
+  ok = 1
+  v1 error: 0.000000 m/s
+  v2 error: 0.000000 m/s
+  ✓ PASS — solution found
+  ✓ PASS — v1 error < 10 mm/s (< 0.01 m/s)
+  ✓ PASS — v2 error < 10 mm/s
+
+Test 2: GEO 1km catch-up — minimum ΔV < 15 mm/s
+  Best TOF: 21.54 hr  (90% of orbit)
+  |dv1| = 4.376 mm/s
+  |dv2| = 4.376 mm/s
+  Total = 8.751 mm/s
+  ✓ PASS — total ΔV < 100 mm/s  (expect ~8-15 mm/s)
+  ✓ PASS — total ΔV < 15 mm/s
+
+Test 3: Keplerian propagator — 1 GEO orbit radius drift
+  Radius drift after 1 GEO orbit: 6.97 m
+  ✓ PASS — drift < 1000 m after full GEO orbit
+
+Test 4: LAMBERT_min_dv wrapper — GEO 500m catch-up
+  ok = 1  total_dv = 18.078 mm/s
+  ✓ PASS — min_dv wrapper finds a solution
+  ✓ PASS — total ΔV < 100 mm/s
+
+Test 5: Degenerate geometry (r1 == r2) returns ok=0
+  ok = 0  (expect 0)
+  ✓ PASS — degenerate case returns ok=0 (no crash)
+
+=== ALL PASS (0 failures) ===
+=== Chief Pose Estimator C Verification ===
+
+Test 1: Init — quaternion is unit norm
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  |q| = 1.00000000
+  ✓ PASS — |q| = 1.0 after init
+
+Test 2: Init — P diagonal is positive
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  ✓ PASS — all diagonal P elements > 0
+  P[0][0]=0.2742  P[3][3]=0.007615
+
+Test 3: Predict — quaternion stays unit norm after 200 steps
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  |q| after 200 steps = 1.00000000
+  ✓ PASS — |q| = 1.0 ± 1e-5 after 200 predict steps
+
+Test 4: Covariance stays symmetric after predict/update
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  ✓ PASS — P is symmetric after 100 steps
+  ✓ PASS — P diagonal is positive after 100 steps
+
+Test 5: valid flag set after >= 10 successful PnP updates
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  valid after 10 updates=1
+  ✓ PASS — valid=1 reached within 200 steps at 2m range
+
+Test 6: Omega uncertainty decreases with successful updates
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  omega_uncertainty: init=0.0873  after=0.0018 rad/s
+  ✓ PASS — omega uncertainty decreases after updates
+
+Test 7: Far range (10km) — update_count stays 0
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  update_count = 0  (expect 0)
+  ✓ PASS — no PnP updates beyond max_range
+  ✓ PASS — valid=0 beyond max_range
+
+Test 8: CPE_get_R_body2lvlh returns 0 before first PnP
+  ChiefPoseEstimator (EKF): sigma_pnp=3.0deg  sigma_omega_proc=0.0573deg/s/sqrt(s)  gate=5sigma
+  has_R_b2l = 0  (expect 0)
+  ✓ PASS — CPE_get_R_body2lvlh returns 0 before any PnP
+  has_R_b2l after 50 steps = 1
+  (1 = PnP succeeded at least once; 0 = all attempts failed)
+
+=== ALL PASS (0 failures) ===
+
+=== Running Python SIL comparison ===
+[wrapper] C library loaded OK -> C:\Users\Venkat\OneDrive\Desktop\appex\Satellite_GNC\gnc_lib.dll
+==========================================================
+  SIL Verification: Python TH-EKF  vs  C TH-EKF
+==========================================================
+
+  Running 360 predict/update steps (3600s) �
+  TH-EKF: a=42164km, e=0.0010, T=23.93hr, n=15.0412deg/hr
+
+  State divergence after 360 steps:
+    PASS dx [m]        err=5.08e-11  (thr=1e-04)  py=+170.931355  c=+170.931355
+    PASS dy [m]        err=1.84e-11  (thr=1e-04)  py=+710.659190  c=+710.659190
+    PASS dz [m]        err=3.40e-11  (thr=1e-04)  py=-149.667602  c=-149.667602
+    PASS dvx[m/s]      err=9.30e-16  (thr=1e-07)  py=+0.064125  c=+0.064125
+    PASS dvy[m/s]      err=2.55e-14  (thr=1e-07)  py=+0.046845  c=+0.046845
+    PASS dvz[m/s]      err=2.13e-14  (thr=1e-07)  py=-0.039869  c=-0.039869
+
+  Covariance max element error: 1.25e-14  (thr=1e-06)  PASS
+
+==========================================================
+  PASS  ALL PASS -- C EKF matches Python golden model
+==========================================================
+
+=== Running Real-Time SIL verification ===
+============================================================
+  Real-Time SIL Verification Suite
+  C Flight Loop -- PC SIL (no STM32 needed)
+============================================================
+
+Test 1: Nominal -- timing + EKF convergence
+    3600 ticks wall time : 124.0ms  (100 Hz realtime = 36000ms)
+    Max loop time        : 0.0410ms  (deadline 10.0ms)
+    Missed deadlines     : 0
+    Final pos std        : [0.09 0.04 0.09] m
+    PASS PASS -- max loop time < 10.0ms
+    PASS PASS -- zero missed deadlines in batch SIL
+    PASS PASS -- EKF position std < 50.0m after 36s
+    Timing margin        : 244x budget  (strong evidence)
+
+Test 2: Range sensor dropout (ticks 1000-1200, ~20s)
+    Range dropped for   : 20 guidance ticks
+    PASS PASS -- no range updates during dropout period
+    Pos std pre-dropout : [0.17 0.06 0.17]
+    Pos std max during  : [0.23 0.08 0.23]
+    PASS PASS -- EKF std < 200.0m during dropout (dead-reckoning holds)
+    Pos std post-recover: [0.13 0.05 0.13]
+    PASS PASS -- EKF re-converges after range sensor recovers
+
+Test 3: Camera spike rejection
+    EKF pos at spike tick: [-0.000e+00  7.999e+01 -1.000e-02] m
+    EKF range at spike   : 79.99 m
+    PASS PASS -- EKF x-state < 9000.0m after spike (spike rejected)
+    PASS PASS -- EKF range not corrupted by spike
+    PASS PASS -- Position uncertainty unaffected by rejected spike
+
+Test 4: Gyro bias step -- MEKF recovery
+    Injected bias step : 5.0 mrad/s (all axes)
+    MEKF bias estimate : [3.987 3.103 4.199] mrad/s
+    Bias estimate err  : 2.295 mrad/s
+    PASS PASS -- MEKF bias error < 5 mrad/s after step
+    Max quaternion norm error: 1.10e-07
+    PASS PASS -- Quaternion stays unit norm throughout bias step
+
+============================================================
+  PASS  ALL PASS (11/11)
+  C navigation stack: fixed-rate SIL loop with
+  bounded execution time and sensor dropout testing.
+============================================================
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW ModeManager initialised — starting in DETUMBLE
+  flight_loop v2: full ADCS stack enabled
+  FSW [    0.0s] DETUMBLE             -> SUN_ACQUISITION
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW ModeManager initialised — starting in DETUMBLE
+  flight_loop v2: full ADCS stack enabled
+  FSW [    0.0s] DETUMBLE             -> SUN_ACQUISITION
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW ModeManager initialised — starting in DETUMBLE
+  flight_loop v2: full ADCS stack enabled
+  FSW [    0.0s] DETUMBLE             -> SUN_ACQUISITION
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW ModeManager initialised — starting in DETUMBLE
+  flight_loop v2: full ADCS stack enabled
+  FSW [    0.0s] DETUMBLE             -> SUN_ACQUISITION
+
+=== Running Closed-Loop SIL verification ===
+==========================================================
+  Closed-Loop SIL Verification
+  C Flight Loop <-> Python Plant
+==========================================================
+
+  NOTE: Python plant models found.
+  Build-gate closed-loop uses PhysicsPlantSim by default.
+  Set CLOSED_LOOP_REAL_PLANT=1 to run the slower real-plant harness.
+
+
+Scenario 1: Detumble + Sun Acquisition
+
+----------------------------------------------------------
+  Scenario: Detumble+SunAcq
+----------------------------------------------------------
+  ClosedLoopPlant: PhysicsPlantSim (I_diag=[4167. 4167. 3000.] g.m2, |B|=40�T, tau_max=2mN.m)
+  [t=    0.0s] FSW -1       -> DETUMBLE  rng=499.7m  pstd_y=0.300m  omega=24.658deg/s  pt=0.2deg
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+       0  DETUMBLE  ?-1          499.7    0.300    -0.01    1.00    0.01    0.000   0.000   0.000  24.658    0.25
+      10  DETUMBLE  ?-1          500.1    0.060     8.30   13.07   36.16    0.000   0.000   0.000  23.277  121.42
+      20  DETUMBLE  ?-1          500.1    0.045    -1.93    6.60    8.73    0.000   0.000   0.000  22.391  110.26
+      30  DETUMBLE  ?-1          500.0    0.039     4.34    1.89    3.66    0.000   0.000   0.000  21.011   51.61
+      40  DETUMBLE  ?-1          500.1    0.037    -1.32    1.58    4.33    0.000   0.000   0.000  19.419  168.75
+      50  DETUMBLE  ?-1          500.1    0.035    -2.43    1.70    5.06    0.000   0.000   0.000  17.744   45.08
+      60  DETUMBLE  ?-1          500.1    0.034    -2.44    1.84    2.99    0.000   0.000   0.000  15.827  164.38
+      70  DETUMBLE  ?-1          500.1    0.034    -0.91    1.70    3.13    0.000   0.000   0.000  14.454   59.92
+      80  DETUMBLE  ?-1          500.1    0.033    -0.65    1.38    1.75    0.000   0.000   0.000  12.204   95.92
+      90  DETUMBLE  ?-1          500.1    0.033    -0.01    0.47    0.91    0.000   0.000   0.000  11.331  152.75
+     100  DETUMBLE  ?-1          500.1    0.033     0.47    1.01    0.46    0.000   0.000   0.000  10.470   47.47
+     110  DETUMBLE  ?-1          500.1    0.033     0.92    1.10   -0.35    0.000   0.000   0.000   9.202   58.85
+     120  DETUMBLE  ?-1          500.1    0.032     0.74    0.70   -0.05    0.000   0.000   0.000   8.385  144.96
+     130  DETUMBLE  ?-1          500.1    0.032     0.87    0.79   -0.91    0.000   0.000   0.000   8.110  133.56
+     140  DETUMBLE  ?-1          500.1    0.032     0.46    0.92   -0.59    0.000   0.000   0.000   6.933   61.79
+     150  DETUMBLE  ?-1          500.2    0.032     0.37    1.19    0.34    0.000   0.000   0.000   5.866   15.17
+     160  DETUMBLE  ?-1          500.2    0.032     0.26    1.01    0.41    0.000   0.000   0.000   5.068   59.71
+     170  DETUMBLE  ?-1          500.2    0.032    -0.56    0.85    0.34    0.000   0.000   0.000   4.554  105.16
+     180  DETUMBLE  ?-1          500.2    0.032    -0.64    1.09    0.18    0.000   0.000   0.000   4.134  144.26
+  [t=  189.9s] FSW DETUMBLE -> SUN_ACQ   rng=500.2m  pstd_y=0.032m  omega=3.527deg/s  pt=174.9deg
+     190  SUN_ACQ   ?-1          500.2    0.032    -1.01    0.87    0.17    0.000   0.000   0.000   3.520  157.52
+     200  SUN_ACQ   ?-1          500.2    0.032    -0.54    0.85    0.32    0.000   0.000   0.000   3.043  166.80
+     210  SUN_ACQ   ?-1          500.2    0.032    -0.39    0.95    0.49    0.000   0.000   0.000   2.581  161.19
+     220  SUN_ACQ   ?-1          500.3    0.032    -0.18    1.32    0.57    0.000   0.000   0.000   2.159  174.36
+     230  SUN_ACQ   ?-1          500.3    0.032     0.17    1.38    0.18    0.000   0.000   0.000   1.762   57.63
+     240  SUN_ACQ   ?-1          500.3    0.032     0.11    1.26    0.25    0.000   0.000   0.000   1.379   59.66
+     250  SUN_ACQ   ?-1          500.2    0.032    -0.00    0.36    0.28    0.000   0.000   0.000   1.012   63.60
+     260  SUN_ACQ   ?-1          500.2    0.032     0.03    0.49   -0.09    0.000   0.000   0.000   0.761   66.37
+     270  SUN_ACQ   ?-1          500.3    0.032     0.33    1.04   -0.40    0.000   0.000   0.000   0.627   68.16
+     280  SUN_ACQ   ?-1          500.3    0.032     0.23    1.01   -0.49    0.000   0.000   0.000   0.568   68.56
+     290  SUN_ACQ   ?-1          500.3    0.032     0.02    0.96   -0.59    0.000   0.000   0.000   0.543   68.07
+     300  SUN_ACQ   ?-1          500.3    0.032    -0.18    1.01   -0.10    0.000   0.000   0.000   0.524   40.74
+     310  SUN_ACQ   ?-1          500.3    0.032    -0.38    1.11   -0.01    0.000   0.000   0.000   0.473   43.76
+     320  SUN_ACQ   ?-1          500.3    0.032     0.12    1.17    0.18    0.000   0.000   0.000   0.449   46.23
+     330  SUN_ACQ   ?-1          500.4    0.032    -0.14    1.24    0.15    0.000   0.000   0.000   0.437   47.78
+     340  SUN_ACQ   ?-1          500.3    0.032     0.19    0.90    0.25    0.000   0.000   0.000   0.433   48.81
+     350  SUN_ACQ   ?-1          500.3    0.032     0.08    0.74    0.53    0.000   0.000   0.000   0.431   49.98
+     360  SUN_ACQ   ?-1          500.3    0.032    -0.01    0.77    0.95    0.000   0.000   0.000   0.429   49.08
+  [t=  360.2s] RPOD -1       -> PROX_OPS  rng=500.3m  pstd_y=0.032m  vel=[-0.01,0.81,0.90]mm/s  accel=[0.001,-20.000,-0.093]mm/s2
+  [t=  360.2s] FSW SUN_ACQ  -> FINE_PT   rng=500.3m  pstd_y=0.032m  omega=0.428deg/s  pt=13.0deg
+     370  FINE_PT   PROX_OPS      14.9    0.048    -0.05  -34.57   -0.03    0.000   0.002  -0.035   0.342   13.97
+     380  FINE_PT   PROX_OPS      14.9    0.062    -0.10  -34.54   -0.18    0.000   0.002  -0.004   0.295   15.11
+     390  FINE_PT   PROX_OPS      14.9    0.075    -0.15  -34.52   -0.20    0.000   0.002  -0.000   0.271   16.23
+     400  FINE_PT   PROX_OPS      14.9    0.088    -0.20  -34.49   -0.20    0.000   0.002   0.000   0.259   17.34
+     410  FINE_PT   PROX_OPS      14.8    0.100    -0.25  -34.47   -0.19    0.000   0.002   0.000   0.253   18.43
+     420  FINE_PT   PROX_OPS      14.8    0.113    -0.30  -34.45   -0.19    0.000   0.002   0.000   0.252   19.53
+     430  FINE_PT   PROX_OPS      14.8    0.126    -0.34  -34.42   -0.18    0.000   0.002   0.000   0.252   20.66
+     440  FINE_PT   PROX_OPS      14.8    0.138    -0.39  -34.40   -0.18    0.000   0.002   0.000   0.250   17.78
+     450  FINE_PT   PROX_OPS      14.8    0.151    -0.44  -34.37   -0.17    0.000   0.002   0.000   0.243   18.15
+     460  FINE_PT   PROX_OPS      14.7    0.165    -0.49  -34.35   -0.17    0.000   0.002   0.000   0.240   18.78
+     470  FINE_PT   PROX_OPS      14.7    0.178    -0.54  -34.32   -0.17    0.000   0.002   0.000   0.240   19.66
+     480  FINE_PT   PROX_OPS      14.7    0.192    -0.59  -34.30   -0.16    0.000   0.002   0.000   0.242   20.78
+     490  FINE_PT   PROX_OPS      14.7    0.205    -0.63  -34.28   -0.16    0.000   0.002   0.000   0.245   22.07
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+     500  FINE_PT   PROX_OPS      14.7    0.219    -0.68  -34.25   -0.16    0.000   0.002   0.000   0.250   23.54
+     510  FINE_PT   PROX_OPS      14.6    0.234    -0.73  -34.23   -0.15    0.000   0.002   0.000   0.256   25.16
+     520  FINE_PT   PROX_OPS      14.6    0.248    -0.78  -34.20   -0.15    0.000   0.002   0.000   0.262   26.91
+     530  FINE_PT   PROX_OPS      14.6    0.263    -0.83  -34.18   -0.15    0.000   0.002   0.000   0.269   28.79
+     540  FINE_PT   PROX_OPS      14.6    0.278    -0.87  -34.15   -0.14    0.000   0.002   0.000   0.277   30.79
+     550  FINE_PT   PROX_OPS      14.6    0.293    -0.92  -34.13   -0.14    0.000   0.002   0.000   0.286   32.94
+     560  FINE_PT   PROX_OPS      14.5    0.308    -0.97  -34.10   -0.14    0.000   0.002   0.000   0.295   35.22
+     570  FINE_PT   PROX_OPS      14.5    0.324    -1.02  -34.08   -0.13    0.000   0.002   0.000   0.305   37.62
+     580  FINE_PT   PROX_OPS      14.5    0.340    -1.06  -34.05   -0.13    0.000   0.002   0.000   0.315   40.19
+     590  FINE_PT   PROX_OPS      14.5    0.356    -1.11  -34.03   -0.13    0.000   0.002   0.000   0.326   42.89
+     600  FINE_PT   PROX_OPS      14.5    0.372    -1.16  -34.00   -0.12    0.000   0.002   0.000   0.338   45.77
+     610  FINE_PT   PROX_OPS      14.4    0.388    -1.21  -33.98   -0.12    0.000   0.002   0.000   0.348   47.73
+     620  FINE_PT   PROX_OPS      14.4    0.405    -1.25  -33.95   -0.12    0.000   0.002   0.000   0.358   51.20
+     630  FINE_PT   PROX_OPS      14.4    0.422    -1.30  -33.93   -0.12    0.000   0.002   0.000   0.371   54.74
+     640  FINE_PT   PROX_OPS      14.4    0.439    -1.35  -33.90   -0.11    0.000   0.002   0.000   0.385   58.47
+     650  FINE_PT   PROX_OPS      14.4    0.456    -1.39  -33.88   -0.11    0.000   0.002   0.000   0.399   62.35
+     660  FINE_PT   PROX_OPS      14.3    0.474    -1.44  -33.85   -0.11    0.000   0.002   0.000   0.415   66.40
+     670  FINE_PT   PROX_OPS      14.3    0.492    -1.49  -33.83   -0.11    0.000   0.002   0.000   0.432   70.58
+     680  FINE_PT   PROX_OPS      14.3    0.510    -1.53  -33.80   -0.10    0.000   0.002   0.000   0.449   74.96
+     690  FINE_PT   PROX_OPS      14.3    0.528    -1.58  -33.78   -0.10    0.000   0.002   0.000   0.466   79.52
+     700  FINE_PT   PROX_OPS      14.3    0.546    -1.63  -33.75   -0.10    0.000   0.002   0.000   0.484   84.24
+     710  FINE_PT   PROX_OPS      14.2    0.565    -1.67  -33.73   -0.10    0.000   0.002   0.000   0.503   89.16
+     720  FINE_PT   PROX_OPS      14.2    0.583    -1.72  -33.70   -0.09    0.000   0.002   0.000   0.521   94.25
+     730  FINE_PT   PROX_OPS      14.2    0.602    -1.77  -33.68   -0.09    0.000   0.002   0.000   0.540   99.56
+     740  FINE_PT   PROX_OPS      14.2    0.622    -1.81  -33.65   -0.09    0.000   0.002   0.000   0.559  105.03
+     750  FINE_PT   PROX_OPS      14.2    0.641    -1.86  -33.62   -0.09    0.000   0.002   0.000   0.578  110.69
+     760  FINE_PT   PROX_OPS      14.1    0.660    -1.90  -33.60   -0.09    0.000   0.002   0.000   0.596  116.54
+     770  FINE_PT   PROX_OPS      14.1    0.680    -1.95  -33.57   -0.08    0.000   0.002   0.000   0.614  122.58
+     780  FINE_PT   PROX_OPS      14.1    0.700    -2.00  -33.55   -0.08    0.000   0.002   0.000   0.631  128.83
+     790  FINE_PT   PROX_OPS      14.1    0.720    -2.04  -33.52   -0.08    0.000   0.002   0.000   0.648  135.18
+  Wall time: 20273ms for 80000 ticks (0.253ms/tick)
+
+  Detumble completed at: 190s
+  FINE_POINTING first at: 361s
+  SAFE_MODE entries after detumble: 0
+    PASS PASS -- detumble completes within 300s (got 190s)
+    PASS PASS -- FINE_POINTING reached within 700s (got 361s)
+    PASS PASS -- zero SAFE_MODE entries after initial detumble (got 0)
+
+Scenario 2: RPOD Closure (500m -> dock)
+
+----------------------------------------------------------
+  Scenario: RPOD_Closure
+----------------------------------------------------------
+  ClosedLoopPlant: PhysicsPlantSim (I_diag=[4167. 4167. 3000.] g.m2, |B|=40�T, tau_max=2mN.m)
+  [t=    0.0s] FSW -1       -> SUN_ACQ   rng=499.7m  pstd_y=0.300m  omega=0.114deg/s  pt=0.0deg
+  [t=    0.0s] RPOD -1       -> PROX_OPS  rng=499.7m  pstd_y=0.300m  vel=[-0.01,1.00,0.01]mm/s  accel=[0.030,-20.000,-0.027]mm/s2
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+       0  SUN_ACQ   PROX_OPS     499.7    0.300    -0.01    1.00    0.01    0.030 -20.000  -0.027   0.114    0.00
+  [t=    0.0s] FSW SUN_ACQ  -> FINE_PT   rng=499.7m  pstd_y=0.300m  omega=0.114deg/s  pt=0.5deg
+      10  FINE_PT   PROX_OPS      14.8    5.009     0.00  -34.35   -1.24    0.000   0.002  -0.057   0.088    0.84
+      20  FINE_PT   PROX_OPS      14.7   10.005    -0.05  -34.32   -1.47    0.000   0.002  -0.005   0.065    1.79
+      30  FINE_PT   PROX_OPS      14.7   15.003    -0.10  -34.30   -1.47    0.000   0.002   0.002   0.048    2.32
+      40  FINE_PT   PROX_OPS      14.7   20.002    -0.14  -34.28   -1.44    0.000   0.002   0.003   0.038    2.74
+      50  FINE_PT   PROX_OPS      14.7   25.002    -0.19  -34.25   -1.41    0.000   0.002   0.003   0.032    2.99
+      60  FINE_PT   PROX_OPS      14.7   30.002    -0.24  -34.23   -1.38    0.000   0.002   0.003   0.028    3.38
+      70  FINE_PT   PROX_OPS      14.6   35.001    -0.29  -34.20   -1.35    0.000   0.002   0.003   0.026    3.62
+      80  FINE_PT   PROX_OPS      14.6   40.001    -0.34  -34.18   -1.32    0.000   0.002   0.003   0.025    3.87
+      90  FINE_PT   PROX_OPS      14.6   45.001    -0.38  -34.16   -1.29    0.000   0.002   0.003   0.025    4.12
+     100  FINE_PT   PROX_OPS      14.6   50.001    -0.43  -34.13   -1.26    0.000   0.002   0.003   0.026    4.42
+     110  FINE_PT   PROX_OPS      14.6   50.000    -0.48  -34.11   -1.23    0.000   0.002   0.003   0.026    4.72
+     120  FINE_PT   PROX_OPS      14.5   50.000    -0.53  -34.08   -1.20    0.000   0.002   0.003   0.028    4.91
+     130  FINE_PT   PROX_OPS      14.5   50.000    -0.58  -34.06   -1.17    0.000   0.002   0.003   0.029    5.17
+     140  FINE_PT   PROX_OPS      14.5   50.000    -0.62  -34.04   -1.15    0.000   0.002   0.003   0.030    5.50
+     150  FINE_PT   PROX_OPS      14.5   50.000    -0.67  -34.01   -1.12    0.000   0.002   0.003   0.032    5.89
+     160  FINE_PT   PROX_OPS      14.5   50.000    -0.72  -33.99   -1.09    0.000   0.002   0.003   0.033    6.12
+     170  FINE_PT   PROX_OPS      14.4   50.000    -0.77  -33.96   -1.07    0.000   0.002   0.002   0.035    6.53
+     180  FINE_PT   PROX_OPS      14.4   50.000    -0.81  -33.94   -1.05    0.000   0.002   0.002   0.037    6.92
+     190  FINE_PT   PROX_OPS      14.4   50.000    -0.86  -33.91   -1.02    0.000   0.002   0.002   0.039    7.22
+     200  FINE_PT   PROX_OPS      14.4   50.000    -0.91  -33.89   -1.00    0.000   0.002   0.002   0.041    7.63
+     210  FINE_PT   PROX_OPS      14.3   50.000    -0.96  -33.87   -0.98    0.000   0.002   0.002   0.043    8.13
+     220  FINE_PT   PROX_OPS      14.3   50.000    -1.00  -33.84   -0.95    0.000   0.002   0.002   0.046    8.49
+     230  FINE_PT   PROX_OPS      14.3   50.000    -1.05  -33.82   -0.93    0.000   0.002   0.002   0.048    8.99
+     240  FINE_PT   PROX_OPS      14.3   50.000    -1.10  -33.79   -0.91    0.000   0.002   0.002   0.051    9.49
+     250  FINE_PT   PROX_OPS      14.3   50.000    -1.14  -33.77   -0.89    0.000   0.002   0.002   0.054    9.97
+     260  FINE_PT   PROX_OPS      14.2   50.000    -1.19  -33.74   -0.87    0.000   0.002   0.002   0.057   10.57
+     270  FINE_PT   PROX_OPS      14.2   50.000    -1.24  -33.72   -0.85    0.000   0.002   0.002   0.060   11.14
+     280  FINE_PT   PROX_OPS      14.2   50.000    -1.28  -33.69   -0.83    0.000   0.002   0.002   0.063   11.78
+     290  FINE_PT   PROX_OPS      14.2   50.000    -1.33  -33.67   -0.81    0.000   0.002   0.002   0.066   12.37
+     300  FINE_PT   PROX_OPS      14.2   50.000    -1.38  -33.64   -0.79    0.000   0.002   0.002   0.070   13.10
+     310  FINE_PT   PROX_OPS      14.1   50.000    -1.42  -33.62   -0.77    0.000   0.002   0.002   0.074   13.85
+     320  FINE_PT   PROX_OPS      14.1   50.000    -1.47  -33.59   -0.75    0.000   0.002   0.002   0.078   14.53
+     330  FINE_PT   PROX_OPS      14.1   50.000    -1.52  -33.57   -0.74    0.000   0.002   0.002   0.082   15.34
+     340  FINE_PT   PROX_OPS      14.1   50.000    -1.56  -33.54   -0.72    0.000   0.002   0.002   0.087   16.18
+     350  FINE_PT   PROX_OPS      14.1   50.000    -1.61  -33.52   -0.70    0.000   0.002   0.002   0.091   17.08
+     360  FINE_PT   PROX_OPS      14.1   50.000    -1.66  -33.49   -0.69    0.000   0.002   0.002   0.096   18.08
+     370  FINE_PT   PROX_OPS      14.0   50.000    -1.70  -33.47   -0.67    0.000   0.002   0.002   0.102   18.99
+     380  FINE_PT   PROX_OPS      14.0   50.000    -1.75  -33.44   -0.66    0.000   0.002   0.002   0.107   20.09
+     390  FINE_PT   PROX_OPS      14.0   50.000    -1.79  -33.41   -0.64    0.000   0.002   0.002   0.113   21.18
+     400  FINE_PT   PROX_OPS      14.0   50.000    -1.84  -33.39   -0.63    0.000   0.002   0.001   0.119   22.35
+     410  FINE_PT   PROX_OPS      14.0   50.000    -1.89  -33.36   -0.61    0.000   0.002   0.001   0.126   23.55
+     420  FINE_PT   PROX_OPS      13.9   50.000    -1.93  -33.34   -0.60    0.000   0.002   0.001   0.132   24.86
+     430  FINE_PT   PROX_OPS      13.9   50.000    -1.98  -33.31   -0.58    0.000   0.002   0.001   0.140   26.20
+     440  FINE_PT   PROX_OPS      13.9   50.000    -2.02  -33.29   -0.57    0.000   0.002   0.001   0.147   27.58
+     450  FINE_PT   PROX_OPS      13.9   50.000    -2.07  -33.26   -0.56    0.000   0.002   0.001   0.155   29.13
+     460  FINE_PT   PROX_OPS      13.9   50.000    -2.11  -33.23   -0.54    0.000   0.002   0.001   0.163   30.71
+     470  FINE_PT   PROX_OPS      13.8   50.000    -2.16  -33.21   -0.53    0.000   0.002   0.001   0.172   32.38
+     480  FINE_PT   PROX_OPS      13.8   50.000    -2.20  -33.18   -0.52    0.000   0.002   0.001   0.181   34.14
+     490  FINE_PT   PROX_OPS      13.8   50.000    -2.25  -33.16   -0.51    0.000   0.002   0.001   0.191   36.01
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+     500  FINE_PT   PROX_OPS      13.8   50.000    -2.30  -33.13   -0.49    0.000   0.002   0.001   0.201   37.98
+     510  FINE_PT   PROX_OPS      13.8   50.000    -2.34  -33.10   -0.48    0.000   0.002   0.001   0.211   40.07
+     520  FINE_PT   PROX_OPS      13.7   50.000    -2.39  -33.08   -0.47    0.000   0.002   0.001   0.222   42.22
+     530  FINE_PT   PROX_OPS      13.7   50.000    -2.43  -33.05   -0.46    0.000   0.002   0.001   0.234   44.46
+     540  FINE_PT   PROX_OPS      13.7   50.000    -2.48  -33.03   -0.45    0.000   0.002   0.001   0.246   46.93
+     550  FINE_PT   PROX_OPS      13.7   50.000    -2.52  -33.00   -0.44    0.000   0.002   0.001   0.259   49.42
+     560  FINE_PT   PROX_OPS      13.7   50.000    -2.56  -32.97   -0.43    0.000   0.002   0.001   0.272   52.04
+     570  FINE_PT   PROX_OPS      13.6   50.000    -2.61  -32.95   -0.42    0.000   0.002   0.001   0.286   54.84
+     580  FINE_PT   PROX_OPS      13.6   50.000    -2.65  -32.92   -0.41    0.000   0.002   0.001   0.300   57.81
+     590  FINE_PT   PROX_OPS      13.6   50.000    -2.70  -32.89   -0.40    0.000   0.002   0.001   0.315   60.83
+     600  FINE_PT   PROX_OPS      13.6   50.000    -2.74  -32.87   -0.39    0.000   0.002   0.001   0.330   64.13
+     610  FINE_PT   PROX_OPS      13.6   50.000    -2.79  -32.84   -0.38    0.000   0.002   0.001   0.346   67.46
+     620  FINE_PT   PROX_OPS      13.6   50.000    -2.83  -32.82   -0.37    0.000   0.002   0.001   0.363   70.97
+     630  FINE_PT   PROX_OPS      13.5   50.000    -2.88  -32.79   -0.36    0.000   0.002   0.001   0.380   74.76
+     640  FINE_PT   PROX_OPS      13.5   50.000    -2.92  -32.76   -0.35    0.000   0.002   0.001   0.397   78.61
+     650  FINE_PT   PROX_OPS      13.5   50.000    -2.96  -32.74   -0.35    0.000   0.002   0.001   0.415   82.70
+     660  FINE_PT   PROX_OPS      13.5   50.000    -3.01  -32.71   -0.34    0.000   0.002   0.001   0.433   86.88
+     670  FINE_PT   PROX_OPS      13.5   50.000    -3.05  -32.68   -0.33    0.000   0.002   0.001   0.452   91.36
+     680  FINE_PT   PROX_OPS      13.4   50.000    -3.10  -32.66   -0.32    0.000   0.002   0.001   0.470   95.95
+     690  FINE_PT   PROX_OPS      13.4   50.000    -3.14  -32.63   -0.31    0.000   0.002   0.001   0.489  100.76
+     700  FINE_PT   PROX_OPS      13.4   50.000    -3.18  -32.60   -0.31    0.000   0.002   0.001   0.508  105.70
+     710  FINE_PT   PROX_OPS      13.4   50.000    -3.23  -32.57   -0.30    0.000   0.002   0.001   0.527  110.93
+     720  FINE_PT   PROX_OPS      13.4   50.000    -3.27  -32.55   -0.29    0.000   0.002   0.001   0.546  116.28
+     730  FINE_PT   PROX_OPS      13.3   50.000    -3.32  -32.52   -0.29    0.000   0.002   0.001   0.564  121.83
+     740  FINE_PT   PROX_OPS      13.3   50.000    -3.36  -32.49   -0.28    0.000   0.002   0.001   0.582  127.62
+     750  FINE_PT   PROX_OPS      13.3   50.000    -3.40  -32.47   -0.27    0.000   0.002   0.001   0.599  133.42
+     760  FINE_PT   PROX_OPS      13.3   50.000    -3.45  -32.44   -0.27    0.000   0.002   0.001   0.615  139.52
+     770  FINE_PT   PROX_OPS      13.3   50.000    -3.49  -32.41   -0.26    0.000   0.002   0.001   0.630  145.71
+     780  FINE_PT   PROX_OPS      13.3   50.000    -3.53  -32.38   -0.25    0.000   0.002   0.001   0.644  152.17
+     790  FINE_PT   PROX_OPS      13.2   50.000    -3.58  -32.36   -0.25    0.000   0.002   0.001   0.656  158.59
+     800  FINE_PT   PROX_OPS      13.2   50.000    -3.62  -32.33   -0.24    0.000   0.002   0.001   0.667  165.24
+     810  FINE_PT   PROX_OPS      13.2   50.000    -3.66  -32.30   -0.24    0.000   0.002   0.001   0.676  171.97
+     820  FINE_PT   PROX_OPS      13.2   50.000    -3.70  -32.27   -0.23    0.000   0.002   0.001   0.683  178.76
+     830  FINE_PT   PROX_OPS      13.2   50.000    -3.75  -32.25   -0.22    0.000   0.002   0.001   0.687  174.41
+     840  FINE_PT   PROX_OPS      13.1   50.000    -3.79  -32.22   -0.22    0.000   0.002   0.001   0.690  167.51
+     850  FINE_PT   PROX_OPS      13.1   50.000    -3.83  -32.19   -0.21    0.000   0.002   0.001   0.690  160.59
+     860  FINE_PT   PROX_OPS      13.1   50.000    -3.88  -32.16   -0.21    0.000   0.002   0.001   0.688  153.67
+     870  FINE_PT   PROX_OPS      13.1   50.000    -3.92  -32.14   -0.20    0.000   0.002   0.000   0.683  146.91
+     880  FINE_PT   PROX_OPS      13.1   50.000    -3.96  -32.11   -0.20    0.000   0.002   0.000   0.676  140.01
+     890  FINE_PT   PROX_OPS      13.1   50.000    -4.00  -32.08   -0.19    0.000   0.002   0.000   0.667  133.37
+     900  FINE_PT   PROX_OPS      13.0   50.000    -4.05  -32.05   -0.19    0.000   0.002   0.000   0.655  126.73
+     910  FINE_PT   PROX_OPS      13.0   50.000    -4.09  -32.03   -0.18    0.000   0.002   0.000   0.642  120.23
+     920  FINE_PT   PROX_OPS      13.0   50.000    -4.13  -32.00   -0.18    0.000   0.002   0.000   0.626  113.89
+     930  FINE_PT   PROX_OPS      13.0   50.000    -4.17  -31.97   -0.18    0.000   0.002   0.000   0.609  107.78
+     940  FINE_PT   PROX_OPS      13.0   50.000    -4.22  -31.94   -0.17    0.000   0.002   0.000   0.590  101.78
+     950  FINE_PT   PROX_OPS      12.9   50.000    -4.26  -31.91   -0.17    0.000   0.002   0.000   0.570   95.93
+     960  FINE_PT   PROX_OPS      12.9   50.000    -4.30  -31.89   -0.16    0.000   0.002   0.000   0.549   90.31
+     970  FINE_PT   PROX_OPS      12.9   50.000    -4.34  -31.86   -0.16    0.000   0.002   0.000   0.527   85.01
+     980  FINE_PT   PROX_OPS      12.9   50.000    -4.38  -31.83   -0.16    0.000   0.002   0.000   0.505   79.80
+     990  FINE_PT   PROX_OPS      12.9   50.000    -4.42  -31.80   -0.15    0.000   0.002   0.000   0.482   74.85
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    1000  FINE_PT   PROX_OPS      12.9   50.000    -4.47  -31.77   -0.15    0.000   0.002   0.000   0.459   70.15
+    1010  FINE_PT   PROX_OPS      12.8   50.000    -4.51  -31.75   -0.14    0.000   0.002   0.000   0.436   65.73
+    1020  FINE_PT   PROX_OPS      12.8   50.000    -4.55  -31.72   -0.14    0.000   0.002   0.000   0.413   61.43
+    1030  FINE_PT   PROX_OPS      12.8   50.000    -4.59  -31.69   -0.14    0.000   0.002   0.000   0.391   57.41
+    1040  FINE_PT   PROX_OPS      12.8   50.000    -4.63  -31.66   -0.13    0.000   0.002   0.000   0.369   53.63
+    1050  FINE_PT   PROX_OPS      12.8   50.000    -4.67  -31.63   -0.13    0.000   0.002   0.000   0.348   50.03
+    1060  FINE_PT   PROX_OPS      12.8   50.000    -4.72  -31.60   -0.13    0.000   0.002   0.000   0.327   46.67
+    1070  FINE_PT   PROX_OPS      12.7   50.000    -4.76  -31.58   -0.12    0.000   0.002   0.000   0.308   43.50
+    1080  FINE_PT   PROX_OPS      12.7   50.000    -4.80  -31.55   -0.12    0.000   0.002   0.000   0.289   40.48
+    1090  FINE_PT   PROX_OPS      12.7   50.000    -4.84  -31.52   -0.12    0.000   0.002   0.000   0.270   37.69
+    1100  FINE_PT   PROX_OPS      12.7   50.000    -4.88  -31.49   -0.12    0.000   0.002   0.000   0.253   35.08
+    1110  FINE_PT   PROX_OPS      12.7   50.000    -4.92  -31.46   -0.11    0.000   0.002   0.000   0.237   32.64
+    1120  FINE_PT   PROX_OPS      12.6   50.000    -4.96  -31.43   -0.11    0.000   0.002   0.000   0.221   30.41
+    1130  FINE_PT   PROX_OPS      12.6   50.000    -5.00  -31.40   -0.11    0.000   0.002   0.000   0.206   28.20
+    1140  FINE_PT   PROX_OPS      12.6   50.000    -5.04  -31.37   -0.10    0.000   0.002   0.000   0.192   26.21
+    1150  FINE_PT   PROX_OPS      12.6   50.000    -5.08  -31.35   -0.10    0.000   0.002   0.000   0.179   24.34
+    1160  FINE_PT   PROX_OPS      12.6   50.000    -5.12  -31.32   -0.10    0.000   0.002   0.000   0.167   22.60
+    1170  FINE_PT   PROX_OPS      12.6   50.000    -5.16  -31.29   -0.10    0.000   0.002   0.000   0.155   21.03
+    1180  FINE_PT   PROX_OPS      12.5   50.000    -5.21  -31.26   -0.09    0.000   0.002   0.000   0.145   19.55
+    1190  FINE_PT   PROX_OPS      12.5   50.000    -5.25  -31.23   -0.09    0.000   0.002   0.000   0.135   18.13
+    1200  FINE_PT   PROX_OPS      12.5   50.000    -5.29  -31.20   -0.09    0.000   0.002   0.000   0.125   16.87
+    1210  FINE_PT   PROX_OPS      12.5   50.000    -5.33  -31.17   -0.09    0.000   0.002   0.000   0.117   15.67
+    1220  FINE_PT   PROX_OPS      12.5   50.000    -5.37  -31.14   -0.09    0.000   0.002   0.000   0.108   14.49
+    1230  FINE_PT   PROX_OPS      12.5   50.000    -5.41  -31.11   -0.08    0.000   0.002   0.000   0.100   13.43
+    1240  FINE_PT   PROX_OPS      12.4   50.000    -5.45  -31.08   -0.08    0.001   0.002   0.000   0.093   12.52
+    1250  FINE_PT   PROX_OPS      12.4   50.000    -5.49  -31.06   -0.08    0.001   0.002   0.000   0.087   11.58
+    1260  FINE_PT   PROX_OPS      12.4   50.000    -5.53  -31.03   -0.08    0.001   0.002   0.000   0.081   10.78
+    1270  FINE_PT   PROX_OPS      12.4   50.000    -5.57  -31.00   -0.08    0.001   0.002   0.000   0.075    9.99
+    1280  FINE_PT   PROX_OPS      12.4   50.000    -5.61  -30.97   -0.07    0.001   0.002   0.000   0.069    9.25
+    1290  FINE_PT   PROX_OPS      12.4   50.000    -5.65  -30.94   -0.07    0.001   0.002   0.000   0.064    8.63
+    1300  FINE_PT   PROX_OPS      12.3   50.000    -5.68  -30.91   -0.07    0.001   0.002   0.000   0.060    7.92
+    1310  FINE_PT   PROX_OPS      12.3   50.000    -5.72  -30.88   -0.07    0.001   0.002   0.000   0.055    7.41
+    1320  FINE_PT   PROX_OPS      12.3   50.000    -5.76  -30.85   -0.07    0.001   0.002   0.000   0.051    6.84
+    1330  FINE_PT   PROX_OPS      12.3   50.000    -5.80  -30.82   -0.07    0.001   0.002   0.000   0.048    6.39
+    1340  FINE_PT   PROX_OPS      12.3   50.000    -5.84  -30.79   -0.06    0.001   0.002   0.000   0.044    5.89
+    1350  FINE_PT   PROX_OPS      12.3   50.000    -5.88  -30.76   -0.06    0.001   0.002   0.000   0.041    5.45
+    1360  FINE_PT   PROX_OPS      12.2   50.000    -5.92  -30.73   -0.06    0.001   0.002   0.000   0.038    5.07
+    1370  FINE_PT   PROX_OPS      12.2   50.000    -5.96  -30.70   -0.06    0.001   0.002   0.000   0.035    4.70
+    1380  FINE_PT   PROX_OPS      12.2   50.000    -6.00  -30.67   -0.06    0.001   0.002   0.000   0.033    4.37
+    1390  FINE_PT   PROX_OPS      12.2   50.000    -6.04  -30.64   -0.06    0.001   0.002   0.000   0.030    4.06
+    1400  FINE_PT   PROX_OPS      12.2   50.000    -6.08  -30.61   -0.05    0.001   0.002   0.000   0.028    3.73
+    1410  FINE_PT   PROX_OPS      12.2   50.000    -6.12  -30.58   -0.05    0.001   0.002   0.000   0.026    3.54
+    1420  FINE_PT   PROX_OPS      12.1   50.000    -6.15  -30.55   -0.05    0.001   0.002   0.000   0.024    3.24
+    1430  FINE_PT   PROX_OPS      12.1   50.000    -6.19  -30.52   -0.05    0.001   0.002   0.000   0.022    3.06
+    1440  FINE_PT   PROX_OPS      12.1   50.000    -6.23  -30.49   -0.05    0.001   0.002   0.000   0.021    2.80
+    1450  FINE_PT   PROX_OPS      12.1   50.000    -6.27  -30.46   -0.05    0.001   0.002   0.000   0.020    2.65
+    1460  FINE_PT   PROX_OPS      12.1   50.000    -6.31  -30.43   -0.05    0.001   0.002   0.000   0.018    2.42
+    1470  FINE_PT   PROX_OPS      12.1   50.000    -6.35  -30.40   -0.05    0.001   0.002   0.000   0.017    2.23
+    1480  FINE_PT   PROX_OPS      12.0   50.000    -6.39  -30.37   -0.04    0.001   0.002   0.000   0.016    2.09
+    1490  FINE_PT   PROX_OPS      12.0   50.000    -6.42  -30.34   -0.04    0.001   0.002   0.000   0.014    1.90
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    1500  FINE_PT   PROX_OPS      12.0   50.000    -6.46  -30.31   -0.04    0.001   0.002   0.000   0.013    1.80
+    1510  FINE_PT   PROX_OPS      12.0   50.000    -6.50  -30.28   -0.04    0.001   0.002   0.000   0.012    1.67
+    1520  FINE_PT   PROX_OPS      12.0   50.000    -6.54  -30.25   -0.04    0.001   0.002   0.000   0.012    1.52
+    1530  FINE_PT   PROX_OPS      12.0   50.000    -6.58  -30.22   -0.04    0.001   0.002   0.000   0.011    1.42
+    1540  FINE_PT   PROX_OPS      11.9   50.000    -6.61  -30.19   -0.04    0.001   0.002   0.000   0.010    1.32
+    1550  FINE_PT   PROX_OPS      11.9   50.000    -6.65  -30.16   -0.04    0.001   0.002   0.000   0.009    1.24
+    1560  FINE_PT   PROX_OPS      11.9   50.000    -6.69  -30.13   -0.04    0.001   0.002   0.000   0.008    1.10
+    1570  FINE_PT   PROX_OPS      11.9   50.000    -6.73  -30.10   -0.04    0.001   0.002   0.000   0.008    1.03
+    1580  FINE_PT   PROX_OPS      11.9   50.000    -6.76  -30.07   -0.03    0.001   0.002   0.000   0.007    1.01
+    1590  FINE_PT   PROX_OPS      11.9   50.000    -6.80  -30.04   -0.03    0.001   0.002   0.000   0.007    0.91
+    1600  FINE_PT   PROX_OPS      11.8   50.000    -6.84  -30.01   -0.03    0.001   0.002   0.000   0.006    0.84
+    1610  FINE_PT   PROX_OPS      11.8   50.000    -6.88  -29.98   -0.03    0.001   0.002   0.000   0.006    0.79
+    1620  FINE_PT   PROX_OPS      11.8   50.000    -6.91  -29.95   -0.03    0.001   0.002   0.000   0.005    0.69
+    1630  FINE_PT   PROX_OPS      11.8   50.000    -6.95  -29.92   -0.03    0.001   0.002   0.000   0.005    0.71
+    1640  FINE_PT   PROX_OPS      11.8   50.000    -6.99  -29.89   -0.03    0.001   0.002   0.000   0.005    0.58
+    1650  FINE_PT   PROX_OPS      11.8   50.000    -7.03  -29.86   -0.03    0.001   0.002   0.000   0.004    0.63
+    1660  FINE_PT   PROX_OPS      11.7   50.000    -7.06  -29.83   -0.03    0.001   0.002   0.000   0.004    0.60
+    1670  FINE_PT   PROX_OPS      11.7   50.000    -7.10  -29.80   -0.03    0.001   0.002   0.000   0.004    0.49
+    1680  FINE_PT   PROX_OPS      11.7   50.000    -7.14  -29.77   -0.03    0.001   0.002   0.000   0.003    0.46
+    1690  FINE_PT   PROX_OPS      11.7   50.000    -7.17  -29.74   -0.03    0.001   0.002   0.000   0.003    0.42
+    1700  FINE_PT   PROX_OPS      11.7   50.000    -7.21  -29.71   -0.03    0.001   0.002   0.000   0.003    0.39
+    1710  FINE_PT   PROX_OPS      11.7   50.000    -7.25  -29.68   -0.02    0.001   0.002   0.000   0.003    0.38
+    1720  FINE_PT   PROX_OPS      11.6   50.000    -7.28  -29.64   -0.02    0.001   0.002   0.000   0.002    0.34
+    1730  FINE_PT   PROX_OPS      11.6   50.000    -7.32  -29.61   -0.02    0.001   0.002   0.000   0.002    0.29
+    1740  FINE_PT   PROX_OPS      11.6   50.000    -7.36  -29.58   -0.02    0.001   0.002   0.000   0.002    0.27
+    1750  FINE_PT   PROX_OPS      11.6   50.000    -7.39  -29.55   -0.02    0.001   0.002   0.000   0.002    0.25
+    1760  FINE_PT   PROX_OPS      11.6   50.000    -7.43  -29.52   -0.02    0.001   0.002   0.000   0.002    0.26
+    1770  FINE_PT   PROX_OPS      11.6   50.000    -7.47  -29.49   -0.02    0.001   0.002   0.000   0.002    0.20
+    1780  FINE_PT   PROX_OPS      11.5   50.000    -7.50  -29.46   -0.02    0.001   0.002   0.000   0.002    0.28
+    1790  FINE_PT   PROX_OPS      11.5   50.000    -7.54  -29.43   -0.02    0.001   0.002   0.000   0.002    0.24
+    1800  FINE_PT   PROX_OPS      11.5   50.000    -7.57  -29.40   -0.02    0.001   0.002   0.000   0.002    0.20
+    1810  FINE_PT   PROX_OPS      11.5   50.000    -7.61  -29.37   -0.02    0.001   0.002   0.000   0.001    0.18
+    1820  FINE_PT   PROX_OPS      11.5   50.000    -7.65  -29.33   -0.02    0.001   0.002   0.000   0.001    0.17
+    1830  FINE_PT   PROX_OPS      11.5   50.000    -7.68  -29.30   -0.02    0.001   0.002   0.000   0.001    0.15
+    1840  FINE_PT   PROX_OPS      11.4   50.000    -7.72  -29.27   -0.02    0.001   0.002   0.000   0.001    0.10
+    1850  FINE_PT   PROX_OPS      11.4   50.000    -7.75  -29.24   -0.02    0.001   0.002   0.000   0.001    0.13
+    1860  FINE_PT   PROX_OPS      11.4   50.000    -7.79  -29.21   -0.02    0.001   0.002   0.000   0.001    0.15
+    1870  FINE_PT   PROX_OPS      11.4   50.000    -7.83  -29.18   -0.02    0.001   0.002   0.000   0.001    0.12
+    1880  FINE_PT   PROX_OPS      11.4   50.000    -7.86  -29.15   -0.02    0.001   0.002   0.000   0.001    0.12
+    1890  FINE_PT   PROX_OPS      11.4   50.000    -7.90  -29.12   -0.02    0.001   0.002   0.000   0.001    0.10
+    1900  FINE_PT   PROX_OPS      11.4   50.000    -7.93  -29.08   -0.02    0.001   0.002   0.000   0.001    0.09
+    1910  FINE_PT   PROX_OPS      11.3   50.000    -7.97  -29.05   -0.01    0.001   0.002   0.000   0.001    0.08
+    1920  FINE_PT   PROX_OPS      11.3   50.000    -8.00  -29.02   -0.01    0.001   0.002   0.000   0.001    0.09
+    1930  FINE_PT   PROX_OPS      11.3   50.000    -8.04  -28.99   -0.01    0.001   0.002   0.000   0.001    0.06
+    1940  FINE_PT   PROX_OPS      11.3   50.000    -8.07  -28.96   -0.01    0.001   0.002   0.000   0.001    0.07
+    1950  FINE_PT   PROX_OPS      11.3   50.000    -8.11  -28.93   -0.01    0.001   0.002   0.000   0.001    0.10
+    1960  FINE_PT   PROX_OPS      11.3   50.000    -8.14  -28.90   -0.01    0.001   0.002   0.000   0.001    0.10
+    1970  FINE_PT   PROX_OPS      11.2   50.000    -8.18  -28.86   -0.01    0.001   0.002   0.000   0.000    0.05
+    1980  FINE_PT   PROX_OPS      11.2   50.000    -8.21  -28.83   -0.01    0.001   0.002   0.000   0.000    0.02
+    1990  FINE_PT   PROX_OPS      11.2   50.000    -8.25  -28.80   -0.01    0.001   0.002   0.000   0.000    0.04
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    2000  FINE_PT   PROX_OPS      11.2   50.000    -8.28  -28.77   -0.01    0.001   0.002   0.000   0.000    0.06
+    2010  FINE_PT   PROX_OPS      11.2   50.000    -8.32  -28.74   -0.01    0.001   0.002   0.000   0.000    0.08
+    2020  FINE_PT   PROX_OPS      11.2   50.000    -8.35  -28.71   -0.01    0.001   0.002   0.000   0.000    0.08
+    2030  FINE_PT   PROX_OPS      11.1   50.000    -8.39  -28.67   -0.01    0.001   0.002   0.000   0.000    0.06
+    2040  FINE_PT   PROX_OPS      11.1   50.000    -8.42  -28.64   -0.01    0.001   0.002   0.000   0.000    0.08
+    2050  FINE_PT   PROX_OPS      11.1   50.000    -8.45  -28.61   -0.01    0.001   0.002   0.000   0.000    0.07
+    2060  FINE_PT   PROX_OPS      11.1   50.000    -8.49  -28.58   -0.01    0.001   0.002   0.000   0.000    0.11
+    2070  FINE_PT   PROX_OPS      11.1   50.000    -8.52  -28.55   -0.01    0.001   0.002   0.000   0.000    0.06
+    2080  FINE_PT   PROX_OPS      11.1   50.000    -8.56  -28.52   -0.01    0.001   0.002   0.000   0.000    0.03
+    2090  FINE_PT   PROX_OPS      11.1   50.000    -8.59  -28.48   -0.01    0.001   0.002   0.000   0.000    0.05
+    2100  FINE_PT   PROX_OPS      11.0   50.000    -8.62  -28.45   -0.01    0.001   0.002   0.000   0.000    0.04
+    2110  FINE_PT   PROX_OPS      11.0   50.000    -8.66  -28.42   -0.01    0.001   0.002   0.000   0.000    0.01
+    2120  FINE_PT   PROX_OPS      11.0   50.000    -8.69  -28.39   -0.01    0.001   0.002   0.000   0.000    0.03
+    2130  FINE_PT   PROX_OPS      11.0   50.000    -8.73  -28.36   -0.01    0.001   0.002   0.000   0.000    0.04
+    2140  FINE_PT   PROX_OPS      11.0   50.000    -8.76  -28.32   -0.01    0.001   0.002   0.000   0.000    0.01
+    2150  FINE_PT   PROX_OPS      11.0   50.000    -8.79  -28.29   -0.01    0.001   0.002   0.000   0.000    0.02
+    2160  FINE_PT   PROX_OPS      10.9   50.000    -8.83  -28.26   -0.01    0.001   0.002   0.000   0.000    0.06
+    2170  FINE_PT   PROX_OPS      10.9   50.000    -8.86  -28.23   -0.01    0.001   0.002   0.000   0.000    0.02
+    2180  FINE_PT   PROX_OPS      10.9   50.000    -8.89  -28.20   -0.01    0.001   0.002   0.000   0.000    0.01
+    2190  FINE_PT   PROX_OPS      10.9   50.000    -8.93  -28.16   -0.01    0.001   0.002   0.000   0.000    0.03
+    2200  FINE_PT   PROX_OPS      10.9   50.000    -8.96  -28.13   -0.01    0.001   0.002   0.000   0.000    0.04
+    2210  FINE_PT   PROX_OPS      10.9   50.000    -8.99  -28.10   -0.01    0.001   0.002   0.000   0.000    0.05
+    2220  FINE_PT   PROX_OPS      10.9   50.000    -9.03  -28.07   -0.01    0.001   0.002   0.000   0.000    0.07
+    2230  FINE_PT   PROX_OPS      10.8   50.000    -9.06  -28.03   -0.01    0.001   0.002   0.000   0.000    0.03
+    2240  FINE_PT   PROX_OPS      10.8   50.000    -9.09  -28.00   -0.01    0.001   0.002   0.000   0.000    0.05
+    2250  FINE_PT   PROX_OPS      10.8   50.000    -9.13  -27.97   -0.01    0.001   0.002   0.000   0.000    0.04
+    2260  FINE_PT   PROX_OPS      10.8   50.000    -9.16  -27.94   -0.01    0.001   0.002   0.000   0.000    0.02
+    2270  FINE_PT   PROX_OPS      10.8   50.000    -9.19  -27.91   -0.01    0.001   0.002   0.000   0.000    0.01
+    2280  FINE_PT   PROX_OPS      10.8   50.000    -9.22  -27.87   -0.01    0.001   0.002   0.000   0.000    0.09
+    2290  FINE_PT   PROX_OPS      10.8   50.000    -9.26  -27.84   -0.01    0.001   0.002   0.000   0.000    0.03
+    2300  FINE_PT   PROX_OPS      10.7   50.000    -9.29  -27.81   -0.01    0.001   0.002   0.000   0.000    0.03
+    2310  FINE_PT   PROX_OPS      10.7   50.000    -9.32  -27.78   -0.01    0.001   0.002   0.000   0.000    0.02
+    2320  FINE_PT   PROX_OPS      10.7   50.000    -9.35  -27.74   -0.00    0.001   0.002   0.000   0.000    0.01
+    2330  FINE_PT   PROX_OPS      10.7   50.000    -9.39  -27.71   -0.00    0.001   0.002   0.000   0.000    0.05
+    2340  FINE_PT   PROX_OPS      10.7   50.000    -9.42  -27.68   -0.00    0.001   0.002   0.000   0.000    0.05
+    2350  FINE_PT   PROX_OPS      10.7   50.000    -9.45  -27.65   -0.00    0.001   0.002   0.000   0.000    0.03
+    2360  FINE_PT   PROX_OPS      10.6   50.000    -9.48  -27.61   -0.00    0.001   0.002   0.000   0.000    0.05
+    2370  FINE_PT   PROX_OPS      10.6   50.000    -9.52  -27.58   -0.00    0.001   0.002   0.000   0.000    0.04
+    2380  FINE_PT   PROX_OPS      10.6   50.000    -9.55  -27.55   -0.00    0.001   0.002   0.000   0.000    0.02
+    2390  FINE_PT   PROX_OPS      10.6   50.000    -9.58  -27.52   -0.00    0.001   0.002   0.000   0.000    0.05
+    2400  FINE_PT   PROX_OPS      10.6   50.000    -9.61  -27.48   -0.00    0.001   0.002   0.000   0.000    0.09
+    2410  FINE_PT   PROX_OPS      10.6   50.000    -9.64  -27.45   -0.00    0.001   0.002   0.000   0.000    0.02
+    2420  FINE_PT   PROX_OPS      10.6   50.000    -9.67  -27.42   -0.00    0.001   0.002   0.000   0.000    0.01
+    2430  FINE_PT   PROX_OPS      10.5   50.000    -9.71  -27.38   -0.00    0.001   0.002   0.000   0.000    0.06
+    2440  FINE_PT   PROX_OPS      10.5   50.000    -9.74  -27.35   -0.00    0.001   0.002   0.000   0.000    0.03
+    2450  FINE_PT   PROX_OPS      10.5   50.000    -9.77  -27.32   -0.00    0.001   0.002   0.000   0.000    0.05
+    2460  FINE_PT   PROX_OPS      10.5   50.000    -9.80  -27.29   -0.00    0.001   0.002   0.000   0.000    0.02
+    2470  FINE_PT   PROX_OPS      10.5   50.000    -9.83  -27.25   -0.00    0.001   0.002   0.000   0.000    0.04
+    2480  FINE_PT   PROX_OPS      10.5   50.000    -9.86  -27.22   -0.00    0.001   0.002   0.000   0.000    0.05
+    2490  FINE_PT   PROX_OPS      10.5   50.000    -9.90  -27.19   -0.00    0.001   0.002   0.000   0.000    0.03
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    2500  FINE_PT   PROX_OPS      10.4   50.000    -9.93  -27.15   -0.00    0.001   0.002   0.000   0.000    0.06
+    2510  FINE_PT   PROX_OPS      10.4   50.000    -9.96  -27.12   -0.00    0.001   0.002   0.000   0.000    0.06
+    2520  FINE_PT   PROX_OPS      10.4   50.000    -9.99  -27.09   -0.00    0.001   0.002   0.000   0.000    0.03
+    2530  FINE_PT   PROX_OPS      10.4   50.000   -10.02  -27.06   -0.00    0.001   0.002   0.000   0.001    0.09
+    2540  FINE_PT   PROX_OPS      10.4   50.000   -10.05  -27.02   -0.00    0.001   0.002   0.000   0.001    0.06
+    2550  FINE_PT   PROX_OPS      10.4   50.000   -10.08  -26.99   -0.00    0.001   0.002   0.000   0.001    0.08
+    2560  FINE_PT   PROX_OPS      10.4   50.000   -10.11  -26.96   -0.00    0.001   0.002   0.000   0.000    0.08
+    2570  FINE_PT   PROX_OPS      10.3   50.000   -10.14  -26.92   -0.00    0.001   0.002   0.000   0.000    0.05
+    2580  FINE_PT   PROX_OPS      10.3   50.000   -10.17  -26.89   -0.00    0.001   0.002   0.000   0.000    0.08
+    2590  FINE_PT   PROX_OPS      10.3   50.000   -10.20  -26.86   -0.00    0.001   0.002   0.000   0.000    0.03
+    2600  FINE_PT   PROX_OPS      10.3   50.000   -10.23  -26.82   -0.00    0.001   0.002   0.000   0.000    0.10
+    2610  FINE_PT   PROX_OPS      10.3   50.000   -10.26  -26.79   -0.00    0.001   0.002   0.000   0.001    0.04
+    2620  FINE_PT   PROX_OPS      10.3   50.000   -10.30  -26.76   -0.00    0.001   0.002   0.000   0.000    0.08
+    2630  FINE_PT   PROX_OPS      10.3   50.000   -10.33  -26.73   -0.00    0.001   0.002   0.000   0.000    0.05
+    2640  FINE_PT   PROX_OPS      10.2   50.000   -10.36  -26.69   -0.00    0.001   0.002   0.000   0.001    0.07
+    2650  FINE_PT   PROX_OPS      10.2   50.000   -10.39  -26.66   -0.00    0.001   0.002   0.000   0.000    0.03
+    2660  FINE_PT   PROX_OPS      10.2   50.000   -10.42  -26.63   -0.00    0.001   0.002   0.000   0.000    0.07
+    2670  FINE_PT   PROX_OPS      10.2   50.000   -10.45  -26.59   -0.00    0.001   0.002   0.000   0.000    0.07
+    2680  FINE_PT   PROX_OPS      10.2   50.000   -10.48  -26.56   -0.00    0.001   0.002   0.000   0.000    0.02
+    2690  FINE_PT   PROX_OPS      10.2   50.000   -10.51  -26.53   -0.00    0.001   0.002   0.000   0.000    0.05
+    2700  FINE_PT   PROX_OPS      10.2   50.000   -10.54  -26.49   -0.00    0.001   0.002   0.000   0.000    0.11
+    2710  FINE_PT   PROX_OPS      10.1   50.000   -10.57  -26.46   -0.00    0.001   0.002   0.000   0.001    0.12
+    2720  FINE_PT   PROX_OPS      10.1   50.000   -10.59  -26.43   -0.00    0.001   0.002   0.000   0.001    0.07
+    2730  FINE_PT   PROX_OPS      10.1   50.000   -10.62  -26.39   -0.00    0.001   0.002   0.000   0.001    0.09
+    2740  FINE_PT   PROX_OPS      10.1   50.000   -10.65  -26.36   -0.00    0.001   0.002   0.000   0.001    0.02
+    2750  FINE_PT   PROX_OPS      10.1   50.000   -10.68  -26.33   -0.00    0.001   0.002   0.000   0.000    0.03
+    2760  FINE_PT   PROX_OPS      10.1   50.000   -10.71  -26.29   -0.00    0.001   0.002   0.000   0.000    0.06
+    2770  FINE_PT   PROX_OPS      10.1   50.000   -10.74  -26.26   -0.00    0.001   0.002   0.000   0.000    0.02
+    2780  FINE_PT   PROX_OPS      10.0   50.000   -10.77  -26.22   -0.00    0.001   0.002   0.000   0.000    0.18
+    2790  FINE_PT   PROX_OPS      10.0   50.000   -10.80  -26.19   -0.00    0.001   0.002   0.000   0.001    0.06
+    2800  FINE_PT   PROX_OPS      10.0   50.000   -10.83  -26.16   -0.00    0.001   0.002   0.000   0.000    0.06
+    2810  FINE_PT   PROX_OPS      10.0   50.000   -10.86  -26.12   -0.00   -0.000  -0.001  -0.000   0.000    0.04
+    2820  FINE_PT   PROX_OPS      10.1   50.000   -10.88  -26.08   -0.00   -0.013  -0.031  -0.000   0.000    0.05
+    2830  FINE_PT   PROX_OPS      10.2   50.000   -10.91  -26.04   -0.00   -0.022  -0.054  -0.000   0.000    0.03
+    2840  FINE_PT   PROX_OPS      14.1   50.000   -10.83  -25.75   -0.00   -0.434  -1.032   0.000   0.000    0.04
+    2850  FINE_PT   PROX_OPS      12.5   50.000   -10.90  -25.82   -0.00   -0.280  -0.662  -0.000   0.000    0.06
+    2860  FINE_PT   PROX_OPS      10.9   50.000   -10.98  -25.89   -0.00   -0.108  -0.254  -0.000   0.000    0.02
+    2870  FINE_PT   PROX_OPS      10.9   50.000   -11.00  -25.86   -0.00   -0.108  -0.253  -0.000   0.000    0.06
+    2880  FINE_PT   PROX_OPS      10.8   50.000   -11.03  -25.83   -0.00   -0.108  -0.253  -0.000   0.000    0.03
+    2890  FINE_PT   PROX_OPS      10.8   50.000   -11.06  -25.79   -0.00   -0.108  -0.252  -0.000   0.000    0.02
+    2900  FINE_PT   PROX_OPS      12.4   50.000   -11.04  -25.65   -0.00   -0.286  -0.666  -0.000   0.000    0.02
+    2910  FINE_PT   PROX_OPS      11.4   50.000   -11.10  -25.68   -0.00   -0.179  -0.415  -0.000   0.000    0.02
+    2920  FINE_PT   PROX_OPS      10.8   50.000   -11.14  -25.69   -0.00   -0.109  -0.252  -0.000   0.000    0.10
+    2930  FINE_PT   PROX_OPS      10.4   50.000   -11.18  -25.68   -0.00   -0.066  -0.151  -0.000   0.000    0.06
+    2940  FINE_PT   PROX_OPS      10.2   50.000   -11.22  -25.67   -0.00   -0.039  -0.089  -0.000   0.000    0.11
+    2950  FINE_PT   PROX_OPS      10.0   50.000   -11.25  -25.64   -0.00   -0.023  -0.052  -0.000   0.001    0.03
+    2960  FINE_PT   PROX_OPS      13.9   50.000   -11.16  -25.34   -0.00   -0.459  -1.042  -0.000   0.000    0.07
+    2970  FINE_PT   PROX_OPS      10.3   50.000   -11.29  -25.55   -0.00   -0.067  -0.152  -0.000   0.000    0.04
+    2980  FINE_PT   PROX_OPS      13.9   50.000   -11.22  -25.28   -0.00   -0.461  -1.040  -0.000   0.000    0.05
+    2990  FINE_PT   PROX_OPS      10.3   50.000   -11.35  -25.48   -0.00   -0.067  -0.151  -0.000   0.000    0.03
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    3000  FINE_PT   PROX_OPS      13.9   50.000   -11.27  -25.21   -0.00   -0.463  -1.037  -0.000   0.000    0.01
+    3010  FINE_PT   PROX_OPS      10.3   50.000   -11.40  -25.42   -0.00   -0.067  -0.150  -0.000   0.000    0.02
+    3020  FINE_PT   PROX_OPS      13.8   50.000   -11.32  -25.15   -0.00   -0.466  -1.035  -0.000   0.000    0.03
+    3030  FINE_PT   PROX_OPS      10.2   50.000   -11.46  -25.35   -0.00   -0.067  -0.149  -0.000   0.000    0.06
+    3040  FINE_PT   PROX_OPS      13.8   50.000   -11.38  -25.08   -0.00   -0.468  -1.032  -0.000   0.000    0.08
+    3050  FINE_PT   PROX_OPS      16.1   50.000   -11.33  -24.89   -0.00   -0.709  -1.558   0.000   0.000    0.03
+    3060  FINE_PT   PROX_OPS      12.3   50.000   -11.48  -25.11   -0.00   -0.307  -0.672  -0.000   0.000    0.04
+    3070  FINE_PT   PROX_OPS      10.6   50.000   -11.55  -25.19   -0.00   -0.116  -0.253  -0.000   0.000    0.04
+    3080  FINE_PT   PROX_OPS      10.0   50.000   -11.60  -25.19   -0.00    1.902   4.131   0.000   0.000    0.06
+    3090  FINE_PT   PROX_OPS      13.8   50.000   -11.51  -24.91   -0.00   -0.484  -1.047  -0.000   0.000    0.07
+    3100  FINE_PT   PROX_OPS      11.2   50.000   -11.62  -25.05   -0.00   -0.192  -0.414  -0.000   0.000    0.10
+    3110  FINE_PT   PROX_OPS      10.1   50.000   -11.67  -25.08   -0.00   -0.069  -0.149  -0.000   0.000    0.02
+    3120  FINE_PT   PROX_OPS      16.1   50.000   -11.52  -24.65   -0.00   -0.736  -1.576   0.000   0.000    0.03
+    3130  FINE_PT   PROX_OPS      12.1   50.000   -11.66  -24.88   -0.00   -0.311  -0.664  -0.000   0.000    0.06
+    3140  FINE_PT   PROX_OPS      10.5   50.000   -11.74  -24.95   -0.00   -0.117  -0.248  -0.000   0.000    0.03
+    3150  FINE_PT   PROX_OPS       9.9   50.000   -11.79  -24.96   -0.00    1.930   4.087   0.000   0.000    0.04
+    3160  FINE_PT   PROX_OPS      13.6   50.000   -11.69  -24.67   -0.00   -0.491  -1.037  -0.000   0.000    0.03
+    3170  FINE_PT   PROX_OPS      11.0   50.000   -11.80  -24.81   -0.00   -0.194  -0.408  -0.000   0.000    0.02
+    3180  FINE_PT   PROX_OPS      10.0   50.000   -11.86  -24.84   -0.00   -0.070  -0.146  -0.000   0.000    0.01
+    3190  FINE_PT   PROX_OPS      16.0   50.000   -11.70  -24.42   -0.00   -0.749  -1.564   0.000   0.000    0.04
+    3200  FINE_PT   PROX_OPS      12.0   50.000   -11.85  -24.64   -0.00   -0.315  -0.656  -0.000   0.000    0.03
+    3210  FINE_PT   PROX_OPS      12.1   50.000   -11.87  -24.60   -0.00   -0.327  -0.679  -0.000   0.000    0.02
+    3220  FINE_PT   PROX_OPS      10.0   50.000   -11.96  -24.71   -0.00    1.957   4.041   0.000   0.000    0.01
+    3230  FINE_PT   PROX_OPS      11.0   50.000   -11.96  -24.60   -0.00   -0.204  -0.419  -0.000   0.000    0.02
+    3240  FINE_PT   PROX_OPS      13.7   50.000   -11.90  -24.40   -0.00   -0.518  -1.063  -0.000   0.000    0.05
+    3250  FINE_PT   PROX_OPS      10.0   50.000   -12.04  -24.60   -0.00    1.968   4.022   0.000   0.000    0.01
+    3260  FINE_PT   PROX_OPS      11.0   50.000   -12.03  -24.50   -0.00   -0.204  -0.416  -0.000   0.000    0.06
+    3270  FINE_PT   PROX_OPS      13.6   50.000   -11.97  -24.30   -0.00   -0.522  -1.059  -0.000   0.000    0.02
+    3280  FINE_PT   PROX_OPS       9.9   50.000   -12.12  -24.50   -0.00    1.980   4.004   0.000   0.000    0.04
+    3290  FINE_PT   PROX_OPS      10.9   50.000   -12.11  -24.40   -0.00   -0.205  -0.414  -0.000   0.000    0.07
+    3300  FINE_PT   PROX_OPS      13.5   50.000   -12.05  -24.19   -0.00   -0.525  -1.054  -0.000   0.000    0.04
+    3310  FINE_PT   PROX_OPS       9.9   50.000   -12.19  -24.40   -0.00    1.991   3.985   0.000   0.000    0.04
+    3320  FINE_PT   PROX_OPS      10.9   50.000   -12.18  -24.30   -0.00   -0.206  -0.411  -0.000   0.000    0.03
+    3330  FINE_PT   PROX_OPS      13.5   50.000   -12.12  -24.09   -0.00   -0.528  -1.050  -0.000   0.000    0.02
+    3340  FINE_PT   PROX_OPS       9.8   50.000   -12.27  -24.30   -0.00    2.003   3.967   0.000   0.000    0.06
+    3350  FINE_PT   PROX_OPS      10.8   50.000   -12.26  -24.20   -0.00   -0.207  -0.408  -0.000   0.000    0.02
+    3360  FINE_PT   PROX_OPS      13.4   50.000   -12.20  -23.99   -0.00   -0.531  -1.045  -0.000   0.000    0.01
+    3370  FINE_PT   PROX_OPS       9.8   50.000   -12.34  -24.20   -0.00    2.014   3.948   0.000   0.000    0.01
+    3380  FINE_PT   PROX_OPS      10.8   50.000   -12.33  -24.10   -0.00   -0.207  -0.405  -0.000   0.000    0.02
+    3390  FINE_PT   PROX_OPS      13.4   50.000   -12.27  -23.89   -0.00   -0.534  -1.041  -0.000   0.000    0.03
+    3400  FINE_PT   PROX_OPS       9.7   50.000   -12.42  -24.09   -0.00    2.025   3.930   0.000   0.000    0.07
+    3410  FINE_PT   PROX_OPS      10.7   50.000   -12.41  -24.00   -0.00   -0.208  -0.402  -0.000   0.000    0.03
+    3420  FINE_PT   PROX_OPS      13.3   50.000   -12.34  -23.79   -0.00   -0.537  -1.036  -0.000   0.000    0.00
+    3430  FINE_PT   PROX_OPS       9.7   50.000   -12.49  -23.99   -0.00    2.036   3.911   0.000   0.000    0.05
+    3440  FINE_PT   PROX_OPS      10.7   50.000   -12.48  -23.89   -0.00   -0.209  -0.400  -0.000   0.000    0.02
+    3450  FINE_PT   PROX_OPS      13.3   50.000   -12.42  -23.69   -0.00   -0.540  -1.031  -0.000   0.000    0.03
+    3460  FINE_PT   PROX_OPS       9.6   50.000   -12.56  -23.89   -0.00    2.047   3.893   0.000   0.000    0.02
+    3470  FINE_PT   PROX_OPS      10.6   50.000   -12.55  -23.79   -0.00   -0.209  -0.397  -0.000   0.000    0.02
+    3480  FINE_PT   PROX_OPS      10.6   50.000   -12.58  -23.76   -0.00   -0.211  -0.398  -0.000   0.000    0.03
+    3490  FINE_PT   PROX_OPS      10.0   50.000   -12.62  -23.76   -0.00    2.056   3.869   0.000   0.000    0.04
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    3500  FINE_PT   PROX_OPS      16.0   50.000   -12.44  -23.34   -0.00   -0.873  -1.638  -0.000   0.000    0.03
+    3510  FINE_PT   PROX_OPS      11.7   50.000   -12.61  -23.58   -0.00   -0.368  -0.688  -0.000   0.000    0.02
+    3520  FINE_PT   PROX_OPS      10.0   50.000   -12.69  -23.66   -0.00    2.066   3.850   0.000   0.000    0.05
+    3530  FINE_PT   PROX_OPS      10.0   50.000   -12.72  -23.62   -0.00    2.069   3.844   0.000   0.000    0.01
+    3540  FINE_PT   PROX_OPS      10.0   50.000   -12.74  -23.59   -0.00    2.073   3.838   0.000   0.000    0.04
+    3550  FINE_PT   PROX_OPS       9.9   50.000   -12.76  -23.55   -0.00    2.076   3.832   0.000   0.000    0.01
+    3560  FINE_PT   PROX_OPS       9.9   50.000   -12.79  -23.52   -0.00    2.080   3.826   0.000   0.000    0.02
+    3570  FINE_PT   PROX_OPS       9.9   50.000   -12.81  -23.49   -0.00    2.083   3.819   0.000   0.000    0.02
+    3580  FINE_PT   PROX_OPS       9.9   50.000   -12.83  -23.45   -0.00    2.087   3.813   0.000   0.000    0.03
+    3590  FINE_PT   PROX_OPS       9.9   50.000   -12.86  -23.42   -0.00    2.090   3.807   0.000   0.000    0.03
+    3600  FINE_PT   PROX_OPS       9.9   50.000   -12.88  -23.38   -0.00    2.094   3.801   0.000   0.000    0.02
+    3610  FINE_PT   PROX_OPS       9.9   50.000   -12.90  -23.35   -0.00    2.097   3.795   0.000   0.000    0.02
+    3620  FINE_PT   PROX_OPS       9.8   50.000   -12.93  -23.32   -0.00    2.101   3.789   0.000   0.000    0.01
+    3630  FINE_PT   PROX_OPS       9.8   50.000   -12.95  -23.28   -0.00    2.104   3.782   0.000   0.000    0.02
+    3640  FINE_PT   PROX_OPS       9.8   50.000   -12.97  -23.25   -0.00    2.108   3.776   0.000   0.000    0.03
+    3650  FINE_PT   PROX_OPS       9.8   50.000   -13.00  -23.21   -0.00    2.111   3.770   0.000   0.000    0.02
+    3660  FINE_PT   PROX_OPS       9.8   50.000   -13.02  -23.18   -0.00    2.114   3.764   0.000   0.000    0.08
+    3670  FINE_PT   PROX_OPS       9.8   50.000   -13.04  -23.14   -0.00    2.118   3.758   0.000   0.000    0.04
+    3680  FINE_PT   PROX_OPS       9.7   50.000   -13.07  -23.11   -0.00    2.121   3.752   0.000   0.000    0.03
+    3690  FINE_PT   PROX_OPS       9.7   50.000   -13.09  -23.08   -0.00    2.124   3.745   0.000   0.000    0.03
+    3700  FINE_PT   PROX_OPS       9.7   50.000   -13.11  -23.04   -0.00    2.128   3.739   0.000   0.000    0.04
+    3710  FINE_PT   PROX_OPS       9.7   50.000   -13.13  -23.01   -0.00    2.131   3.733   0.000   0.000    0.03
+    3720  FINE_PT   PROX_OPS       9.7   50.000   -13.16  -22.97   -0.00    2.134   3.727   0.000   0.000    0.03
+    3730  FINE_PT   PROX_OPS       9.7   50.000   -13.18  -22.94   -0.00    2.138   3.721   0.000   0.000    0.04
+    3740  FINE_PT   PROX_OPS       9.7   50.000   -13.20  -22.90   -0.00    2.141   3.715   0.000   0.000    0.02
+    3750  FINE_PT   PROX_OPS       9.6   50.000   -13.22  -22.87   -0.00    2.144   3.708   0.000   0.000    0.01
+    3760  FINE_PT   PROX_OPS       9.6   50.000   -13.25  -22.84   -0.00    2.147   3.702   0.000   0.000    0.05
+    3770  FINE_PT   PROX_OPS       9.6   50.000   -13.27  -22.80   -0.00    2.151   3.696   0.000   0.000    0.04
+    3780  FINE_PT   PROX_OPS       9.6   50.000   -13.29  -22.77   -0.00    2.154   3.690   0.000   0.000    0.04
+    3790  FINE_PT   PROX_OPS       9.6   50.000   -13.31  -22.73   -0.00    2.157   3.684   0.000   0.000    0.05
+    3800  FINE_PT   PROX_OPS       9.6   50.000   -13.33  -22.70   -0.00    2.160   3.678   0.000   0.000    0.03
+    3810  FINE_PT   PROX_OPS       9.6   50.000   -13.36  -22.66   -0.00    2.164   3.671   0.000   0.000    0.03
+    3820  FINE_PT   PROX_OPS       9.5   50.000   -13.38  -22.63   -0.00    2.167   3.665   0.000   0.000    0.03
+    3830  FINE_PT   PROX_OPS       9.5   50.000   -13.40  -22.60   -0.00    2.170   3.659   0.000   0.000    0.01
+    3840  FINE_PT   PROX_OPS       9.5   50.000   -13.42  -22.56   -0.00    2.173   3.653   0.000   0.000    0.03
+    3850  FINE_PT   PROX_OPS       9.5   50.000   -13.44  -22.53   -0.00    2.176   3.647   0.000   0.000    0.04
+    3860  FINE_PT   PROX_OPS       9.5   50.000   -13.47  -22.49   -0.00    2.179   3.640   0.000   0.000    0.03
+    3870  FINE_PT   PROX_OPS       9.5   50.000   -13.49  -22.46   -0.00    2.183   3.634   0.000   0.000    0.04
+    3880  FINE_PT   PROX_OPS       9.4   50.000   -13.51  -22.42   -0.00    2.186   3.628   0.000   0.000    0.03
+    3890  FINE_PT   PROX_OPS       9.4   50.000   -13.53  -22.39   -0.00    2.189   3.622   0.000   0.000    0.02
+    3900  FINE_PT   PROX_OPS       9.4   50.000   -13.55  -22.35   -0.00    2.192   3.616   0.000   0.000    0.04
+    3910  FINE_PT   PROX_OPS       9.4   50.000   -13.57  -22.32   -0.00    2.195   3.610   0.000   0.000    0.03
+    3920  FINE_PT   PROX_OPS       9.4   50.000   -13.59  -22.29   -0.00    2.198   3.603   0.000   0.000    0.03
+    3930  FINE_PT   PROX_OPS      15.8   50.000   -13.37  -21.85   -0.00   -1.032  -1.687  -0.000   0.000    0.12
+    3940  FINE_PT   PROX_OPS      10.1   50.000   -13.61  -22.17   -0.00   -0.258  -0.420  -0.000   0.000    0.05
+    3950  FINE_PT   PROX_OPS       9.4   50.000   -13.65  -22.18   -0.00    2.206   3.584   0.000   0.000    0.03
+    3960  FINE_PT   PROX_OPS      15.2   50.000   -13.45  -21.78   -0.00   -0.973  -1.575  -0.000   0.000    0.02
+    3970  FINE_PT   PROX_OPS      12.6   50.000   -13.57  -21.91   -0.00   -0.634  -1.023  -0.000   0.000    0.02
+    3980  FINE_PT   PROX_OPS      11.0   50.000   -13.66  -21.98   -0.00   -0.395  -0.635  -0.000   0.000    0.01
+    3990  FINE_PT   PROX_OPS       9.9   50.000   -13.72  -22.01   -0.00    2.214   3.553   0.000   0.000    0.02
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    4000  FINE_PT   PROX_OPS      15.6   50.000   -13.51  -21.62   -0.00   -1.047  -1.674  -0.000   0.000    0.03
+    4010  FINE_PT   PROX_OPS      12.9   50.000   -13.64  -21.75   -0.00   -0.686  -1.094  -0.000   0.000    0.03
+    4020  FINE_PT   PROX_OPS      11.1   50.000   -13.73  -21.83   -0.00   -0.429  -0.683  -0.000   0.000    0.02
+    4030  FINE_PT   PROX_OPS      13.0   50.000   -13.68  -21.68   -0.00   -0.700  -1.110  -0.000   0.000    0.04
+    4040  FINE_PT   PROX_OPS      12.9   50.000   -13.70  -21.65   -0.00   -0.689  -1.089  -0.000   0.000    0.02
+    4050  FINE_PT   PROX_OPS      10.9   50.000   -13.80  -21.74   -0.00   -0.399  -0.628  -0.000   0.000    0.02
+    4060  FINE_PT   PROX_OPS      12.9   50.000   -13.74  -21.57   -0.00   -0.707  -1.111  -0.000   0.000    0.02
+    4070  FINE_PT   PROX_OPS      12.9   50.000   -13.76  -21.54   -0.00   -0.708  -1.109  -0.000   0.000    0.03
+    4080  FINE_PT   PROX_OPS      12.9   50.000   -13.78  -21.51   -0.00   -0.709  -1.107  -0.000   0.000    0.02
+    4090  FINE_PT   PROX_OPS      12.9   50.000   -13.80  -21.47   -0.00   -0.710  -1.105  -0.000   0.000    0.02
+    4100  FINE_PT   PROX_OPS      12.9   50.000   -13.82  -21.44   -0.00   -0.711  -1.103  -0.000   0.000    0.05
+    4110  FINE_PT   PROX_OPS      12.8   50.000   -13.84  -21.40   -0.00   -0.711  -1.101  -0.000   0.000    0.02
+    4120  FINE_PT   PROX_OPS      12.8   50.000   -13.86  -21.37   -0.00   -0.712  -1.099  -0.000   0.000    0.02
+    4130  FINE_PT   PROX_OPS      12.8   50.000   -13.88  -21.34   -0.00   -0.713  -1.097  -0.000   0.000    0.02
+    4140  FINE_PT   PROX_OPS      12.8   50.000   -13.90  -21.30   -0.00   -0.714  -1.095  -0.000   0.000    0.03
+    4150  FINE_PT   PROX_OPS      12.8   50.000   -13.92  -21.27   -0.00   -0.715  -1.093  -0.000   0.000    0.05
+    4160  FINE_PT   PROX_OPS      12.7   50.000   -13.93  -21.23   -0.00   -0.716  -1.091  -0.000   0.000    0.00
+    4170  FINE_PT   PROX_OPS      12.7   50.000   -13.95  -21.20   -0.00   -0.716  -1.089  -0.000   0.000    0.02
+    4180  FINE_PT   PROX_OPS      12.7   50.000   -13.97  -21.17   -0.00   -0.717  -1.087  -0.000   0.000    0.03
+    4190  FINE_PT   PROX_OPS      12.7   50.000   -13.99  -21.13   -0.00   -0.718  -1.085  -0.000   0.000    0.04
+    4200  FINE_PT   PROX_OPS      12.7   50.000   -14.01  -21.10   -0.00   -0.719  -1.083  -0.000   0.000    0.03
+    4210  FINE_PT   PROX_OPS      12.6   50.000   -14.03  -21.06   -0.00   -0.720  -1.081  -0.000   0.000    0.03
+    4220  FINE_PT   PROX_OPS      12.6   50.000   -14.05  -21.03   -0.00   -0.720  -1.078  -0.000   0.000    0.01
+    4230  FINE_PT   PROX_OPS      12.6   50.000   -14.07  -21.00   -0.00   -0.721  -1.076  -0.000   0.000    0.02
+    4240  FINE_PT   PROX_OPS      12.6   50.000   -14.09  -20.96   -0.00   -0.722  -1.074  -0.000   0.000    0.05
+    4250  FINE_PT   PROX_OPS      12.6   50.000   -14.11  -20.93   -0.00   -0.723  -1.072  -0.000   0.000    0.02
+    4260  FINE_PT   PROX_OPS      12.5   50.000   -14.13  -20.89   -0.00   -0.723  -1.070  -0.000   0.000    0.04
+    4270  FINE_PT   PROX_OPS      12.5   50.000   -14.15  -20.86   -0.00   -0.724  -1.068  -0.000   0.000    0.02
+    4280  FINE_PT   PROX_OPS      12.5   50.000   -14.16  -20.83   -0.00   -0.725  -1.066  -0.000   0.000    0.02
+    4290  FINE_PT   PROX_OPS      12.5   50.000   -14.18  -20.79   -0.00   -0.726  -1.064  -0.000   0.000    0.06
+    4300  FINE_PT   PROX_OPS      12.5   50.000   -14.20  -20.76   -0.00   -0.727  -1.062  -0.000   0.000    0.01
+    4310  FINE_PT   PROX_OPS      12.5   50.000   -14.22  -20.72   -0.00   -0.727  -1.060  -0.000   0.000    0.03
+    4320  FINE_PT   PROX_OPS      12.4   50.000   -14.24  -20.69   -0.00   -0.728  -1.058  -0.000   0.000    0.01
+    4330  FINE_PT   PROX_OPS      12.4   50.000   -14.26  -20.66   -0.00   -0.729  -1.056  -0.000   0.000    0.02
+    4340  FINE_PT   PROX_OPS      12.4   50.000   -14.28  -20.62   -0.00   -0.730  -1.054  -0.000   0.000    0.02
+    4350  FINE_PT   PROX_OPS      12.4   50.000   -14.29  -20.59   -0.00   -0.730  -1.052  -0.000   0.000    0.04
+    4360  FINE_PT   PROX_OPS      12.4   50.000   -14.31  -20.55   -0.00   -0.731  -1.050  -0.000   0.000    0.05
+    4370  FINE_PT   PROX_OPS      12.3   50.000   -14.33  -20.52   -0.00   -0.732  -1.048  -0.000   0.000    0.02
+    4380  FINE_PT   PROX_OPS      12.3   50.000   -14.35  -20.48   -0.00   -0.733  -1.046  -0.000   0.000    0.04
+    4390  FINE_PT   PROX_OPS      12.3   50.000   -14.37  -20.45   -0.00   -0.733  -1.044  -0.000   0.000    0.03
+    4400  FINE_PT   PROX_OPS      12.3   50.000   -14.38  -20.42   -0.00   -0.734  -1.042  -0.000   0.000    0.00
+    4410  FINE_PT   PROX_OPS      12.3   50.000   -14.40  -20.38   -0.00   -0.735  -1.040  -0.000   0.000    0.03
+    4420  FINE_PT   PROX_OPS      12.2   50.000   -14.42  -20.35   -0.00   -0.735  -1.038  -0.000   0.000    0.02
+    4430  FINE_PT   PROX_OPS      12.2   50.000   -14.44  -20.31   -0.00   -0.736  -1.036  -0.000   0.000    0.01
+    4440  FINE_PT   PROX_OPS      12.2   50.000   -14.46  -20.28   -0.00   -0.737  -1.034  -0.000   0.000    0.01
+    4450  FINE_PT   PROX_OPS      12.2   50.000   -14.47  -20.25   -0.00   -0.738  -1.032  -0.000   0.000    0.04
+    4460  FINE_PT   PROX_OPS      12.2   50.000   -14.49  -20.21   -0.00   -0.738  -1.030  -0.000   0.000    0.04
+    4470  FINE_PT   PROX_OPS      12.2   50.000   -14.51  -20.18   -0.00   -0.739  -1.028  -0.000   0.000    0.02
+    4480  FINE_PT   PROX_OPS      12.1   50.000   -14.53  -20.14   -0.00   -0.740  -1.026  -0.000   0.000    0.02
+    4490  FINE_PT   PROX_OPS      12.1   50.000   -14.54  -20.11   -0.00   -0.740  -1.024  -0.000   0.000    0.04
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    4500  FINE_PT   PROX_OPS      12.1   50.000   -14.56  -20.08   -0.00   -0.741  -1.022  -0.000   0.000    0.03
+    4510  FINE_PT   PROX_OPS      12.1   50.000   -14.58  -20.04   -0.00   -0.742  -1.020  -0.000   0.000    0.02
+    4520  FINE_PT   PROX_OPS      12.1   50.000   -14.60  -20.01   -0.00   -0.742  -1.018  -0.000   0.000    0.03
+    4530  FINE_PT   PROX_OPS      12.0   50.000   -14.61  -19.97   -0.00   -0.743  -1.016  -0.000   0.000    0.07
+    4540  FINE_PT   PROX_OPS      12.0   50.000   -14.63  -19.94   -0.00   -0.744  -1.014  -0.000   0.000    0.04
+    4550  FINE_PT   PROX_OPS      12.0   50.000   -14.65  -19.90   -0.00   -0.744  -1.012  -0.000   0.000    0.02
+    4560  FINE_PT   PROX_OPS      12.0   50.000   -14.66  -19.87   -0.00   -0.745  -1.010  -0.000   0.000    0.02
+    4570  FINE_PT   PROX_OPS      12.0   50.000   -14.68  -19.84   -0.00   -0.746  -1.008  -0.000   0.000    0.02
+    4580  FINE_PT   PROX_OPS      12.0   50.000   -14.70  -19.80   -0.00   -0.746  -1.006  -0.000   0.000    0.04
+    4590  FINE_PT   PROX_OPS      11.9   50.000   -14.72  -19.77   -0.00   -0.747  -1.004  -0.000   0.000    0.03
+    4600  FINE_PT   PROX_OPS      11.9   50.000   -14.73  -19.73   -0.00   -0.748  -1.002  -0.000   0.000    0.03
+    4610  FINE_PT   PROX_OPS      11.9   50.000   -14.75  -19.70   -0.00   -0.748  -1.000  -0.000   0.000    0.02
+    4620  FINE_PT   PROX_OPS      11.9   50.000   -14.77  -19.67   -0.00   -0.749  -0.998  -0.000   0.000    0.01
+    4630  FINE_PT   PROX_OPS      11.9   50.000   -14.78  -19.63   -0.00   -0.750  -0.996  -0.000   0.000    0.02
+    4640  FINE_PT   PROX_OPS      11.8   50.000   -14.80  -19.60   -0.00   -0.750  -0.994  -0.000   0.000    0.00
+    4650  FINE_PT   PROX_OPS      11.8   50.000   -14.82  -19.56   -0.00   -0.751  -0.992  -0.000   0.000    0.03
+    4660  FINE_PT   PROX_OPS      11.8   50.000   -14.83  -19.53   -0.00   -0.751  -0.990  -0.000   0.000    0.03
+    4670  FINE_PT   PROX_OPS      11.8   50.000   -14.85  -19.50   -0.00   -0.752  -0.988  -0.000   0.000    0.04
+    4680  FINE_PT   PROX_OPS      11.8   50.000   -14.86  -19.46   -0.00   -0.753  -0.986  -0.000   0.000    0.06
+    4690  FINE_PT   PROX_OPS      11.8   50.000   -14.88  -19.43   -0.00   -0.753  -0.984  -0.000   0.000    0.03
+    4700  FINE_PT   PROX_OPS      11.7   50.000   -14.90  -19.39   -0.00   -0.754  -0.982  -0.000   0.000    0.07
+    4710  FINE_PT   PROX_OPS      11.7   50.000   -14.91  -19.36   -0.00   -0.755  -0.980  -0.000   0.000    0.03
+    4720  FINE_PT   PROX_OPS      11.7   50.000   -14.93  -19.32   -0.00   -0.755  -0.978  -0.000   0.000    0.04
+    4730  FINE_PT   PROX_OPS      11.7   50.000   -14.95  -19.29   -0.00   -0.757  -0.978  -0.000   0.000    0.02
+    4740  FINE_PT   PROX_OPS      12.3   50.000   -14.93  -19.22   -0.00   -0.870  -1.120  -0.000   0.000    0.04
+    4750  FINE_PT   PROX_OPS      10.4   50.000   -15.03  -19.29   -0.00   -0.536  -0.688  -0.000   0.000    0.03
+    4760  FINE_PT   PROX_OPS       9.2   50.000   -15.10  -19.33   -0.00    2.405   3.078   0.000   0.000    0.04
+    4770  FINE_PT   PROX_OPS      14.5   50.000   -14.88  -18.99   -0.00   -1.226  -1.565  -0.000   0.000    0.01
+    4780  FINE_PT   PROX_OPS      11.8   50.000   -15.02  -19.11   -0.00   -0.786  -1.001  -0.000   0.000    0.03
+    4790  FINE_PT   PROX_OPS       9.1   50.000   -15.15  -19.23   -0.00    2.411   3.060   0.000   0.000    0.02
+    4800  FINE_PT   PROX_OPS      11.7   50.000   -15.05  -19.04   -0.00   -0.790  -0.999  -0.000   0.000    0.04
+    4810  FINE_PT   PROX_OPS      15.3   50.000   -14.90  -18.80   -0.00   -1.363  -1.720  -0.000   0.000    0.01
+    4820  FINE_PT   PROX_OPS      10.3   50.000   -15.14  -19.05   -0.00   -0.543  -0.684  -0.000   0.000    0.06
+    4830  FINE_PT   PROX_OPS      14.4   50.000   -14.97  -18.78   -0.00   -1.237  -1.553  -0.000   0.000    0.01
+    4840  FINE_PT   PROX_OPS       9.9   50.000   -15.19  -19.00   -0.00    2.413   3.020   0.000   0.000    0.02
+    4850  FINE_PT   PROX_OPS      12.2   50.000   -15.10  -18.84   -0.00   -0.887  -1.106  -0.000   0.000    0.02
+    4860  FINE_PT   PROX_OPS       9.0   50.000   -15.26  -18.98   -0.00    2.425   3.017   0.000   0.000    0.04
+    4870  FINE_PT   PROX_OPS      11.6   50.000   -15.16  -18.80   -0.00   -0.793  -0.985  -0.000   0.000    0.02
+    4880  FINE_PT   PROX_OPS      15.1   50.000   -15.01  -18.57   -0.00   -1.373  -1.699  -0.000   0.000    0.03
+    4890  FINE_PT   PROX_OPS      10.2   50.000   -15.25  -18.81   -0.00   -0.544  -0.671  -0.000   0.000    0.03
+    4900  FINE_PT   PROX_OPS      14.3   50.000   -15.08  -18.55   -0.00   -1.246  -1.534  -0.000   0.000    0.03
+    4910  FINE_PT   PROX_OPS       9.8   50.000   -15.29  -18.76   -0.00    2.427   2.978   0.000   0.000    0.03
+    4920  FINE_PT   PROX_OPS      12.1   50.000   -15.20  -18.60   -0.00   -0.891  -1.090  -0.000   0.000    0.03
+    4930  FINE_PT   PROX_OPS       8.9   50.000   -15.36  -18.74   -0.00    2.439   2.975   0.000   0.000    0.01
+    4940  FINE_PT   PROX_OPS      11.5   50.000   -15.26  -18.56   -0.00   -0.797  -0.970  -0.000   0.000    0.03
+    4950  FINE_PT   PROX_OPS      15.0   50.000   -15.11  -18.33   -0.00   -1.383  -1.678  -0.000   0.000    0.09
+    4960  FINE_PT   PROX_OPS      10.1   50.000   -15.35  -18.57   -0.00   -0.544  -0.659  -0.000   0.000    0.04
+    4970  FINE_PT   PROX_OPS      14.1   50.000   -15.18  -18.31   -0.00   -1.255  -1.514  -0.000   0.000    0.01
+    4980  FINE_PT   PROX_OPS       9.7   50.000   -15.40  -18.52   -0.00    2.440   2.936   0.000   0.000    0.01
+    4990  FINE_PT   PROX_OPS      11.9   50.000   -15.31  -18.36   -0.00   -0.895  -1.073  -0.000   0.000    0.06
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    5000  FINE_PT   PROX_OPS      14.1   50.000   -15.22  -18.21   -0.00   -1.272  -1.522  -0.000   0.000    0.03
+    5010  FINE_PT   PROX_OPS       8.9   50.000   -15.48  -18.46   -0.00    2.453   2.926   0.000   0.000    0.03
+    5020  FINE_PT   PROX_OPS       8.9   50.000   -15.49  -18.43   -0.00    2.455   2.920   0.000   0.000    0.03
+    5030  FINE_PT   PROX_OPS       8.9   50.000   -15.50  -18.40   -0.00    2.456   2.914   0.000   0.000    0.06
+    5040  FINE_PT   PROX_OPS       8.9   50.000   -15.52  -18.36   -0.00    2.458   2.908   0.000   0.000    0.03
+    5050  FINE_PT   PROX_OPS       8.8   50.000   -15.53  -18.33   -0.00    2.460   2.902   0.000   0.000    0.08
+    5060  FINE_PT   PROX_OPS       8.8   50.000   -15.55  -18.29   -0.00    2.462   2.897   0.000   0.000    0.02
+    5070  FINE_PT   PROX_OPS       8.8   50.000   -15.56  -18.26   -0.00    2.464   2.891   0.000   0.000    0.02
+    5080  FINE_PT   PROX_OPS       8.8   50.000   -15.57  -18.22   -0.00    2.465   2.885   0.000   0.000    0.02
+    5090  FINE_PT   PROX_OPS      10.0   50.000   -15.53  -18.12   -0.00    2.456   2.865   0.000   0.000    0.01
+    5100  FINE_PT   PROX_OPS      11.8   50.000   -15.46  -17.99   -0.00   -0.905  -1.054  -0.000   0.000    0.04
+    5110  FINE_PT   PROX_OPS      14.0   50.000   -15.37  -17.83   -0.00   -1.290  -1.497  -0.000   0.000    0.02
+    5120  FINE_PT   PROX_OPS      11.9   50.000   -15.48  -17.91   -0.00   -0.941  -1.089  -0.000   0.000    0.01
+    5130  FINE_PT   PROX_OPS      15.1   50.000   -15.34  -17.70   -0.00   -1.491  -1.721  -0.000   0.000    0.03
+    5140  FINE_PT   PROX_OPS      12.0   50.000   -15.50  -17.84   -0.00   -0.966  -1.111  -0.000   0.000    0.08
+    5150  FINE_PT   PROX_OPS      10.0   50.000   -15.61  -17.91   -0.00    2.465   2.829   0.000   0.000    0.03
+    5160  FINE_PT   PROX_OPS      15.1   50.000   -15.38  -17.60   -0.00   -1.497  -1.713  -0.000   0.000    0.04
+    5170  FINE_PT   PROX_OPS      11.9   50.000   -15.54  -17.74   -0.00   -0.967  -1.104  -0.000   0.000    0.03
+    5180  FINE_PT   PROX_OPS       9.9   50.000   -15.65  -17.81   -0.00    2.470   2.811   0.000   0.000    0.04
+    5190  FINE_PT   PROX_OPS      15.0   50.000   -15.42  -17.50   -0.00   -1.500  -1.703  -0.000   0.000    0.04
+    5200  FINE_PT   PROX_OPS      11.9   50.000   -15.58  -17.63   -0.00   -0.968  -1.096  -0.000   0.000    0.07
+    5210  FINE_PT   PROX_OPS       9.9   50.000   -15.69  -17.71   -0.00    2.475   2.793   0.000   0.000    0.08
+    5220  FINE_PT   PROX_OPS      15.0   50.000   -15.45  -17.40   -0.00   -1.504  -1.693  -0.000   0.000    0.02
+    5230  FINE_PT   PROX_OPS      11.8   50.000   -15.62  -17.53   -0.00   -0.969  -1.088  -0.000   0.000    0.10
+    5240  FINE_PT   PROX_OPS       9.8   50.000   -15.73  -17.61   -0.00    2.479   2.776   0.000   0.001    0.07
+    5250  FINE_PT   PROX_OPS      14.9   50.000   -15.49  -17.30   -0.00   -1.508  -1.683  -0.000   0.000    0.03
+    5260  FINE_PT   PROX_OPS      11.8   50.000   -15.66  -17.43   -0.00   -0.970  -1.081  -0.000   0.000    0.02
+    5270  FINE_PT   PROX_OPS       9.8   50.000   -15.77  -17.51   -0.00    2.484   2.758   0.000   0.000    0.07
+    5280  FINE_PT   PROX_OPS      14.8   50.000   -15.53  -17.20   -0.00   -1.511  -1.674  -0.000   0.000    0.02
+    5290  FINE_PT   PROX_OPS      11.7   50.000   -15.69  -17.33   -0.00   -0.971  -1.073  -0.000   0.000    0.12
+    5300  FINE_PT   PROX_OPS       9.7   50.000   -15.80  -17.40   -0.00    2.489   2.741   0.000   0.000    0.09
+    5310  FINE_PT   PROX_OPS      14.8   50.000   -15.57  -17.10   -0.00   -1.515  -1.664  -0.000   0.000    0.02
+    5320  FINE_PT   PROX_OPS      11.7   50.000   -15.73  -17.23   -0.00   -0.972  -1.065  -0.000   0.000    0.08
+    5330  FINE_PT   PROX_OPS       9.7   50.000   -15.84  -17.30   -0.00    2.493   2.723   0.000   0.000    0.16
+    5340  FINE_PT   PROX_OPS      14.7   50.000   -15.60  -17.00   -0.00   -1.518  -1.654  -0.000   0.001    0.07
+    5350  FINE_PT   PROX_OPS      11.6   50.000   -15.77  -17.13   -0.00   -0.973  -1.058  -0.000   0.001    0.07
+    5360  FINE_PT   PROX_OPS       9.6   50.000   -15.88  -17.20   -0.00    2.497   2.705   0.000   0.000    0.07
+    5370  FINE_PT   PROX_OPS      14.6   50.000   -15.64  -16.90   -0.00   -1.521  -1.644  -0.000   0.000    0.05
+    5380  FINE_PT   PROX_OPS      11.5   50.000   -15.81  -17.03   -0.00   -0.974  -1.050  -0.000   0.000    0.10
+    5390  FINE_PT   PROX_OPS       9.6   50.000   -15.91  -17.10   -0.00    2.502   2.688   0.000   0.000    0.05
+    5400  FINE_PT   PROX_OPS      14.6   50.000   -15.68  -16.80   -0.00   -1.525  -1.634  -0.000   0.000    0.03
+    5410  FINE_PT   PROX_OPS      11.5   50.000   -15.84  -16.93   -0.00   -0.975  -1.042  -0.000   0.000    0.02
+    5420  FINE_PT   PROX_OPS       9.5   50.000   -15.95  -17.00   -0.00    2.506   2.670   0.000   0.000    0.09
+    5430  FINE_PT   PROX_OPS      14.5   50.000   -15.71  -16.70   -0.00   -1.528  -1.624  -0.000   0.000    0.08
+    5440  FINE_PT   PROX_OPS      11.4   50.000   -15.88  -16.83   -0.00   -0.976  -1.035  -0.000   0.000    0.08
+    5450  FINE_PT   PROX_OPS       9.5   50.000   -15.99  -16.90   -0.00    2.510   2.653   0.000   0.000    0.04
+    5460  FINE_PT   PROX_OPS      14.5   50.000   -15.75  -16.60   -0.00   -1.531  -1.614  -0.000   0.000    0.08
+    5470  FINE_PT   PROX_OPS      11.4   50.000   -15.91  -16.73   -0.00   -0.977  -1.027  -0.000   0.000    0.08
+    5480  FINE_PT   PROX_OPS       9.4   50.000   -16.02  -16.79   -0.00    2.514   2.635   0.000   0.000    0.06
+    5490  FINE_PT   PROX_OPS      14.4   50.000   -15.78  -16.50   -0.00   -1.534  -1.604  -0.000   0.000    0.09
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    5500  FINE_PT   PROX_OPS      11.3   50.000   -15.95  -16.62   -0.00   -0.978  -1.020  -0.000   0.000    0.07
+    5510  FINE_PT   PROX_OPS       9.4   50.000   -16.06  -16.69   -0.00    2.518   2.618   0.000   0.000    0.01
+    5520  FINE_PT   PROX_OPS      14.3   50.000   -15.82  -16.40   -0.00   -1.537  -1.594  -0.000   0.000    0.03
+    5530  FINE_PT   PROX_OPS      11.3   50.000   -15.98  -16.52   -0.00   -0.979  -1.012  -0.000   0.000    0.04
+    5540  FINE_PT   PROX_OPS       9.3   50.000   -16.09  -16.59   -0.00    2.522   2.600   0.000   0.000    0.08
+    5550  FINE_PT   PROX_OPS      14.3   50.000   -15.85  -16.30   -0.00   -1.540  -1.584  -0.000   0.000    0.07
+    5560  FINE_PT   PROX_OPS      11.2   50.000   -16.01  -16.42   -0.00   -0.979  -1.005  -0.000   0.000    0.03
+    5570  FINE_PT   PROX_OPS       9.3   50.000   -16.12  -16.49   -0.00    2.526   2.583   0.000   0.000    0.05
+    5580  FINE_PT   PROX_OPS      14.2   50.000   -15.88  -16.20   -0.00   -1.543  -1.575  -0.000   0.000    0.04
+    5590  FINE_PT   PROX_OPS      11.2   50.000   -16.05  -16.32   -0.00   -0.980  -0.997  -0.000   0.000    0.00
+    5600  FINE_PT   PROX_OPS       9.2   50.000   -16.16  -16.39   -0.00    2.529   2.566   0.000   0.000    0.02
+    5610  FINE_PT   PROX_OPS      14.1   50.000   -15.91  -16.10   -0.00   -1.546  -1.565  -0.000   0.000    0.08
+    5620  FINE_PT   PROX_OPS      11.1   50.000   -16.08  -16.22   -0.00   -0.981  -0.990  -0.000   0.000    0.05
+    5630  FINE_PT   PROX_OPS       9.2   50.000   -16.19  -16.29   -0.00    2.533   2.548   0.000   0.000    0.13
+    5640  FINE_PT   PROX_OPS      14.1   50.000   -15.95  -16.00   -0.00   -1.549  -1.555  -0.000   0.000    0.06
+    5650  FINE_PT   PROX_OPS      11.1   50.000   -16.11  -16.12   -0.00   -0.981  -0.982  -0.000   0.000    0.06
+    5660  FINE_PT   PROX_OPS       9.1   50.000   -16.22  -16.19   -0.00    2.536   2.531   0.000   0.000    0.02
+    5670  FINE_PT   PROX_OPS      14.0   50.000   -15.98  -15.90   -0.00   -1.552  -1.545  -0.000   0.000    0.03
+    5680  FINE_PT   PROX_OPS      11.0   50.000   -16.14  -16.02   -0.00   -0.982  -0.975  -0.000   0.000    0.06
+    5690  FINE_PT   PROX_OPS       9.1   50.000   -16.25  -16.09   -0.00    2.540   2.514   0.000   0.000    0.04
+    5700  FINE_PT   PROX_OPS      14.0   50.000   -16.01  -15.80   -0.00   -1.555  -1.535  -0.000   0.000    0.05
+    5710  FINE_PT   PROX_OPS      10.9   50.000   -16.17  -15.92   -0.00   -0.982  -0.967  -0.000   0.000    0.03
+    5720  FINE_PT   PROX_OPS       9.0   50.000   -16.28  -15.98   -0.00    2.543   2.496   0.000   0.000    0.06
+    5730  FINE_PT   PROX_OPS      13.9   50.000   -16.04  -15.70   -0.00   -1.558  -1.525  -0.000   0.001    0.05
+    5740  FINE_PT   PROX_OPS      10.9   50.000   -16.20  -15.82   -0.00   -0.983  -0.960  -0.000   0.000    0.07
+    5750  FINE_PT   PROX_OPS       9.0   50.000   -16.31  -15.88   -0.00    2.546   2.479   0.000   0.000    0.03
+    5760  FINE_PT   PROX_OPS      13.8   50.000   -16.07  -15.60   -0.00   -1.561  -1.515  -0.000   0.000    0.01
+    5770  FINE_PT   PROX_OPS      10.8   50.000   -16.24  -15.72   -0.00   -0.983  -0.952  -0.000   0.000    0.02
+    5780  FINE_PT   PROX_OPS       8.9   50.000   -16.34  -15.78   -0.00    2.549   2.462   0.000   0.000    0.02
+    5790  FINE_PT   PROX_OPS      13.8   50.000   -16.10  -15.50   -0.00   -1.563  -1.506  -0.000   0.000    0.03
+    5800  FINE_PT   PROX_OPS      10.8   50.000   -16.26  -15.62   -0.00   -0.984  -0.945  -0.000   0.000    0.03
+    5810  FINE_PT   PROX_OPS       8.9   50.000   -16.37  -15.68   -0.00    2.552   2.444   0.000   0.000    0.04
+    5820  FINE_PT   PROX_OPS      13.7   50.000   -16.13  -15.40   -0.00   -1.566  -1.496  -0.000   0.000    0.02
+    5830  FINE_PT   PROX_OPS      10.7   50.000   -16.29  -15.52   -0.00   -0.984  -0.938  -0.000   0.000    0.09
+    5840  FINE_PT   PROX_OPS       8.8   50.000   -16.40  -15.58   -0.00    2.555   2.427   0.000   0.000    0.05
+    5850  FINE_PT   PROX_OPS      13.7   50.000   -16.16  -15.30   -0.00   -1.568  -1.486  -0.000   0.000    0.03
+    5860  FINE_PT   PROX_OPS      10.7   50.000   -16.32  -15.42   -0.00   -0.984  -0.930  -0.000   0.000    0.05
+    5870  FINE_PT   PROX_OPS       8.8   50.000   -16.43  -15.48   -0.00    2.558   2.410   0.000   0.000    0.03
+    5880  FINE_PT   PROX_OPS      13.6   50.000   -16.18  -15.21   -0.00   -1.571  -1.476  -0.000   0.000    0.01
+    5890  FINE_PT   PROX_OPS      10.6   50.000   -16.35  -15.32   -0.00   -0.985  -0.923  -0.000   0.000    0.02
+    5900  FINE_PT   PROX_OPS       8.8   50.000   -16.46  -15.38   -0.00    2.561   2.393   0.000   0.000    0.01
+    5910  FINE_PT   PROX_OPS      13.5   50.000   -16.21  -15.11   -0.00   -1.574  -1.466  -0.000   0.000    0.11
+    5920  FINE_PT   PROX_OPS      10.6   50.000   -16.38  -15.22   -0.00   -0.985  -0.916  -0.000   0.000    0.07
+    5930  FINE_PT   PROX_OPS       8.7   50.000   -16.49  -15.28   -0.00    2.564   2.376   0.000   0.000    0.03
+    5940  FINE_PT   PROX_OPS      13.5   50.000   -16.24  -15.01   -0.00   -1.576  -1.457  -0.000   0.000    0.05
+    5950  FINE_PT   PROX_OPS      10.5   50.000   -16.41  -15.12   -0.00   -0.985  -0.908  -0.000   0.000    0.08
+    5960  FINE_PT   PROX_OPS       8.7   50.000   -16.51  -15.18   -0.00    2.566   2.359   0.000   0.000    0.01
+    5970  FINE_PT   PROX_OPS      13.4   50.000   -16.27  -14.91   -0.00   -1.578  -1.447  -0.000   0.000    0.03
+    5980  FINE_PT   PROX_OPS      10.5   50.000   -16.43  -15.02   -0.00   -0.985  -0.901  -0.000   0.000    0.03
+    5990  FINE_PT   PROX_OPS       8.6   50.000   -16.54  -15.08   -0.00    2.569   2.342   0.000   0.000    0.03
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    6000  FINE_PT   PROX_OPS      13.4   50.000   -16.29  -14.81   -0.00   -1.581  -1.437  -0.000   0.000    0.04
+    6010  FINE_PT   PROX_OPS      10.4   50.000   -16.46  -14.92   -0.00   -0.986  -0.894  -0.000   0.000    0.03
+    6020  FINE_PT   PROX_OPS       8.6   50.000   -16.57  -14.98   -0.00    2.571   2.325   0.000   0.000    0.02
+    6030  FINE_PT   PROX_OPS      13.3   50.000   -16.32  -14.71   -0.00   -1.583  -1.427  -0.000   0.000    0.04
+    6040  FINE_PT   PROX_OPS      10.4   50.000   -16.48  -14.82   -0.00   -0.986  -0.886  -0.000   0.000    0.02
+    6050  FINE_PT   PROX_OPS       8.5   50.000   -16.59  -14.88   -0.00    2.574   2.308   0.000   0.000    0.02
+    6060  FINE_PT   PROX_OPS      13.2   50.000   -16.34  -14.61   -0.00   -1.585  -1.418  -0.000   0.000    0.02
+    6070  FINE_PT   PROX_OPS      10.3   50.000   -16.51  -14.72   -0.00   -0.986  -0.879  -0.000   0.000    0.02
+    6080  FINE_PT   PROX_OPS       8.5   50.000   -16.62  -14.78   -0.00    2.576   2.291   0.000   0.000    0.03
+    6090  FINE_PT   PROX_OPS      13.2   50.000   -16.37  -14.51   -0.00   -1.588  -1.408  -0.000   0.000    0.04
+    6100  FINE_PT   PROX_OPS      10.3   50.000   -16.54  -14.62   -0.00   -0.986  -0.872  -0.000   0.000    0.06
+    6110  FINE_PT   PROX_OPS       8.4   50.000   -16.64  -14.68   -0.00    2.578   2.274   0.000   0.000    0.04
+    6120  FINE_PT   PROX_OPS      13.1   50.000   -16.39  -14.42   -0.00   -1.590  -1.398  -0.000   0.000    0.02
+    6130  FINE_PT   PROX_OPS      10.2   50.000   -16.56  -14.52   -0.00   -0.986  -0.865  -0.000   0.000    0.07
+    6140  FINE_PT   PROX_OPS       8.4   50.000   -16.67  -14.58   -0.00    2.581   2.257   0.000   0.000    0.04
+    6150  FINE_PT   PROX_OPS      13.1   50.000   -16.42  -14.32   -0.00   -1.592  -1.388  -0.000   0.000    0.06
+    6160  FINE_PT   PROX_OPS      10.2   50.000   -16.58  -14.42   -0.00   -0.986  -0.858  -0.000   0.000    0.01
+    6170  FINE_PT   PROX_OPS       8.4   50.000   -16.69  -14.48   -0.00    2.583   2.240   0.000   0.000    0.04
+    6180  FINE_PT   PROX_OPS      13.0   50.000   -16.44  -14.22   -0.00   -1.594  -1.379  -0.000   0.000    0.03
+    6190  FINE_PT   PROX_OPS      10.1   50.000   -16.61  -14.32   -0.00   -0.986  -0.850  -0.000   0.000    0.03
+    6200  FINE_PT   PROX_OPS       8.3   50.000   -16.71  -14.38   -0.00    2.585   2.223   0.000   0.000    0.05
+    6210  FINE_PT   PROX_OPS      13.0   50.000   -16.46  -14.12   -0.00   -1.596  -1.369  -0.000   0.000    0.02
+    6220  FINE_PT   PROX_OPS      10.1   50.000   -16.63  -14.22   -0.00   -0.986  -0.843  -0.000   0.000    0.02
+    6230  FINE_PT   PROX_OPS       8.3   50.000   -16.74  -14.28   -0.00    2.586   2.206   0.000   0.000    0.05
+    6240  FINE_PT   PROX_OPS      12.9   50.000   -16.49  -14.02   -0.00   -1.598  -1.359  -0.000   0.000    0.02
+    6250  FINE_PT   PROX_OPS      10.0   50.000   -16.65  -14.13   -0.00   -0.986  -0.836  -0.000   0.000    0.06
+    6260  FINE_PT   PROX_OPS      10.0   50.000   -16.66  -14.09   -0.00   -0.990  -0.838  -0.000   0.000    0.04
+    6270  FINE_PT   PROX_OPS       8.3   50.000   -16.76  -14.14   -0.00    2.588   2.183   0.000   0.000    0.02
+    6280  FINE_PT   PROX_OPS      10.0   50.000   -16.67  -14.02   -0.00   -0.999  -0.840  -0.000   0.000    0.02
+    6290  FINE_PT   PROX_OPS      12.8   50.000   -16.52  -13.86   -0.00   -1.608  -1.349  -0.000   0.000    0.06
+    6300  FINE_PT   PROX_OPS      10.1   50.000   -16.68  -13.95   -0.00   -1.022  -0.855  -0.000   0.000    0.05
+    6310  FINE_PT   PROX_OPS       8.2   50.000   -16.79  -14.01   -0.00    2.590   2.161   0.000   0.000    0.01
+    6320  FINE_PT   PROX_OPS      12.9   50.000   -16.54  -13.76   -0.00   -1.622  -1.350  -0.000   0.000    0.06
+    6330  FINE_PT   PROX_OPS       9.9   50.000   -16.71  -13.86   -0.00    2.572   2.133   0.000   0.000    0.06
+    6340  FINE_PT   PROX_OPS      14.5   50.000   -16.46  -13.61   -0.00   -1.957  -1.619  -0.000   0.000    0.05
+    6350  FINE_PT   PROX_OPS      11.0   50.000   -16.66  -13.74   -0.00   -1.243  -1.026  -0.000   0.000    0.03
+    6360  FINE_PT   PROX_OPS      13.4   50.000   -16.53  -13.60   -0.00   -1.750  -1.440  -0.000   0.000    0.04
+    6370  FINE_PT   PROX_OPS      10.0   50.000   -16.73  -13.72   -0.00    2.573   2.110   0.000   0.000    0.02
+    6380  FINE_PT   PROX_OPS      13.4   50.000   -16.54  -13.53   -0.00   -1.752  -1.433  -0.000   0.000    0.02
+    6390  FINE_PT   PROX_OPS       9.9   50.000   -16.74  -13.66   -0.00    2.573   2.099   0.000   0.000    0.04
+    6400  FINE_PT   PROX_OPS      13.3   50.000   -16.56  -13.47   -0.00   -1.753  -1.426  -0.000   0.000    0.06
+    6410  FINE_PT   PROX_OPS       9.9   50.000   -16.75  -13.59   -0.00    2.574   2.088   0.000   0.000    0.04
+    6420  FINE_PT   PROX_OPS      13.3   50.000   -16.57  -13.40   -0.00   -1.754  -1.419  -0.000   0.000    0.01
+    6430  FINE_PT   PROX_OPS       9.9   50.000   -16.77  -13.53   -0.00    2.575   2.078   0.000   0.000    0.02
+    6440  FINE_PT   PROX_OPS      13.2   50.000   -16.58  -13.34   -0.00   -1.754  -1.412  -0.000   0.000    0.01
+    6450  FINE_PT   PROX_OPS       9.8   50.000   -16.78  -13.46   -0.00    2.576   2.067   0.000   0.000    0.04
+    6460  FINE_PT   PROX_OPS      13.2   50.000   -16.59  -13.28   -0.00   -1.755  -1.405  -0.000   0.000    0.05
+    6470  FINE_PT   PROX_OPS       9.8   50.000   -16.79  -13.40   -0.00    2.577   2.056   0.000   0.000    0.02
+    6480  FINE_PT   PROX_OPS      13.2   50.000   -16.61  -13.21   -0.00   -1.756  -1.397  -0.000   0.000    0.02
+    6490  FINE_PT   PROX_OPS       9.8   50.000   -16.81  -13.33   -0.00    2.578   2.045   0.000   0.000    0.03
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    6500  FINE_PT   PROX_OPS      13.1   50.000   -16.62  -13.15   -0.00   -1.757  -1.390  -0.000   0.000    0.03
+    6510  FINE_PT   PROX_OPS       9.7   50.000   -16.82  -13.27   -0.00    2.578   2.034   0.000   0.000    0.04
+    6520  FINE_PT   PROX_OPS      13.1   50.000   -16.63  -13.08   -0.00   -1.758  -1.383  -0.000   0.000    0.04
+    6530  FINE_PT   PROX_OPS      14.2   50.000   -16.57  -13.00   -0.00   -1.995  -1.565  -0.000   0.000    0.11
+    6540  FINE_PT   PROX_OPS      10.0   50.000   -16.82  -13.15   -0.00   -1.102  -0.862  -0.000   0.000    0.03
+    6550  FINE_PT   PROX_OPS      14.4   50.000   -16.57  -12.92   -0.00   -2.047  -1.597  -0.000   0.000    0.01
+    6560  FINE_PT   PROX_OPS      10.7   50.000   -16.79  -13.06   -0.00   -1.260  -0.981  -0.000   0.000    0.02
+    6570  FINE_PT   PROX_OPS      13.1   50.000   -16.65  -12.92   -0.00   -1.787  -1.387  -0.000   0.000    0.02
+    6580  FINE_PT   PROX_OPS      10.0   50.000   -16.84  -13.02   -0.00    2.576   1.993   0.000   0.000    0.03
+    6590  FINE_PT   PROX_OPS      10.0   50.000   -16.84  -12.99   -0.00    2.577   1.987   0.000   0.000    0.04
+    6600  FINE_PT   PROX_OPS      10.0   50.000   -16.85  -12.96   -0.00    2.577   1.982   0.000   0.000    0.02
+    6610  FINE_PT   PROX_OPS       9.9   50.000   -16.85  -12.93   -0.00    2.577   1.977   0.000   0.000    0.05
+    6620  FINE_PT   PROX_OPS       9.9   50.000   -16.86  -12.89   -0.00    2.578   1.971   0.000   0.000    0.03
+    6630  FINE_PT   PROX_OPS       9.9   50.000   -16.87  -12.86   -0.00    2.578   1.966   0.000   0.000    0.01
+    6640  FINE_PT   PROX_OPS       9.9   50.000   -16.87  -12.83   -0.00    2.578   1.961   0.000   0.000    0.04
+    6650  FINE_PT   PROX_OPS       9.9   50.000   -16.88  -12.80   -0.00    2.578   1.955   0.000   0.000    0.06
+    6660  FINE_PT   PROX_OPS       9.9   50.000   -16.88  -12.76   -0.00    2.579   1.950   0.000   0.000    0.00
+    6670  FINE_PT   PROX_OPS       9.8   50.000   -16.89  -12.73   -0.00    2.579   1.944   0.000   0.000    0.02
+    6680  FINE_PT   PROX_OPS       9.8   50.000   -16.89  -12.70   -0.00    2.579   1.939   0.000   0.000    0.02
+    6690  FINE_PT   PROX_OPS       9.8   50.000   -16.90  -12.67   -0.00    2.579   1.934   0.000   0.000    0.01
+    6700  FINE_PT   PROX_OPS       9.8   50.000   -16.90  -12.64   -0.00    2.579   1.928   0.000   0.000    0.03
+    6710  FINE_PT   PROX_OPS       9.8   50.000   -16.91  -12.60   -0.00    2.580   1.923   0.000   0.000    0.02
+    6720  FINE_PT   PROX_OPS       9.8   50.000   -16.91  -12.57   -0.00    2.580   1.918   0.000   0.000    0.02
+    6730  FINE_PT   PROX_OPS       9.7   50.000   -16.92  -12.54   -0.00    2.580   1.912   0.000   0.000    0.03
+    6740  FINE_PT   PROX_OPS       9.7   50.000   -16.92  -12.51   -0.00    2.580   1.907   0.000   0.000    0.03
+    6750  FINE_PT   PROX_OPS       9.7   50.000   -16.93  -12.48   -0.00    2.580   1.902   0.000   0.000    0.00
+    6760  FINE_PT   PROX_OPS       9.7   50.000   -16.93  -12.44   -0.00    2.580   1.896   0.000   0.000    0.02
+    6770  FINE_PT   PROX_OPS       9.7   50.000   -16.94  -12.41   -0.00    2.581   1.891   0.000   0.000    0.01
+    6780  FINE_PT   PROX_OPS       9.6   50.000   -16.94  -12.38   -0.00    2.581   1.886   0.000   0.000    0.03
+    6790  FINE_PT   PROX_OPS       9.6   50.000   -16.95  -12.35   -0.00    2.581   1.880   0.000   0.000    0.02
+    6800  FINE_PT   PROX_OPS       9.6   50.000   -16.95  -12.31   -0.00    2.581   1.875   0.000   0.000    0.02
+    6810  FINE_PT   PROX_OPS       9.6   50.000   -16.95  -12.28   -0.00    2.581   1.870   0.000   0.000    0.05
+    6820  FINE_PT   PROX_OPS       9.6   50.000   -16.96  -12.25   -0.00    2.581   1.865   0.000   0.000    0.03
+    6830  FINE_PT   PROX_OPS       9.6   50.000   -16.96  -12.22   -0.00    2.581   1.859   0.000   0.000    0.03
+    6840  FINE_PT   PROX_OPS       9.5   50.000   -16.97  -12.19   -0.00    2.581   1.854   0.000   0.000    0.02
+    6850  FINE_PT   PROX_OPS       9.5   50.000   -16.97  -12.15   -0.00    2.581   1.849   0.000   0.000    0.02
+    6860  FINE_PT   PROX_OPS       9.5   50.000   -16.98  -12.12   -0.00    2.582   1.843   0.000   0.000    0.01
+    6870  FINE_PT   PROX_OPS       9.5   50.000   -16.98  -12.09   -0.00    2.582   1.838   0.000   0.000    0.04
+    6880  FINE_PT   PROX_OPS       9.5   50.000   -16.99  -12.06   -0.00    2.582   1.833   0.000   0.000    0.00
+    6890  FINE_PT   PROX_OPS       9.5   50.000   -16.99  -12.03   -0.00    2.582   1.828   0.000   0.000    0.04
+    6900  FINE_PT   PROX_OPS       9.4   50.000   -16.99  -12.00   -0.00    2.582   1.822   0.000   0.000    0.02
+    6910  FINE_PT   PROX_OPS       9.4   50.000   -17.00  -11.96   -0.00    2.582   1.817   0.000   0.000    0.04
+    6920  FINE_PT   PROX_OPS       9.4   50.000   -17.00  -11.93   -0.00    2.582   1.812   0.000   0.000    0.04
+    6930  FINE_PT   PROX_OPS       9.4   50.000   -17.01  -11.90   -0.00    2.582   1.807   0.000   0.000    0.03
+    6940  FINE_PT   PROX_OPS       9.4   50.000   -17.01  -11.87   -0.00    2.582   1.801   0.000   0.000    0.03
+    6950  FINE_PT   PROX_OPS       9.4   50.000   -17.01  -11.84   -0.00    2.582   1.796   0.000   0.000    0.02
+    6960  FINE_PT   PROX_OPS       9.3   50.000   -17.02  -11.80   -0.00    2.582   1.791   0.000   0.000    0.03
+    6970  FINE_PT   PROX_OPS       9.3   50.000   -17.02  -11.77   -0.00    2.582   1.786   0.000   0.000    0.01
+    6980  FINE_PT   PROX_OPS       9.3   50.000   -17.03  -11.74   -0.00    2.582   1.780   0.000   0.000    0.01
+    6990  FINE_PT   PROX_OPS       9.3   50.000   -17.03  -11.71   -0.00    2.582   1.775   0.000   0.000    0.08
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    7000  FINE_PT   PROX_OPS       9.3   50.000   -17.03  -11.68   -0.00    2.582   1.770   0.000   0.000    0.04
+    7010  FINE_PT   PROX_OPS       9.3   50.000   -17.04  -11.65   -0.00    2.582   1.765   0.000   0.000    0.03
+    7020  FINE_PT   PROX_OPS       9.2   50.000   -17.04  -11.61   -0.00    2.582   1.759   0.000   0.000    0.03
+    7030  FINE_PT   PROX_OPS       9.2   50.000   -17.04  -11.58   -0.00    2.582   1.754   0.000   0.000    0.02
+    7040  FINE_PT   PROX_OPS       9.2   50.000   -17.05  -11.55   -0.00    2.581   1.749   0.000   0.000    0.01
+    7050  FINE_PT   PROX_OPS       9.2   50.000   -17.05  -11.52   -0.00    2.581   1.744   0.000   0.000    0.02
+    7060  FINE_PT   PROX_OPS       9.2   50.000   -17.05  -11.49   -0.00    2.581   1.739   0.000   0.000    0.03
+    7070  FINE_PT   PROX_OPS      10.0   50.000   -17.01  -11.42   -0.00    2.571   1.727   0.000   0.000    0.05
+    7080  FINE_PT   PROX_OPS       8.2   50.000   -17.12  -11.46   -0.00    2.593   1.736   0.000   0.000    0.02
+    7090  FINE_PT   PROX_OPS      10.1   50.000   -17.01  -11.35   -0.00   -1.322  -0.883  -0.000   0.000    0.04
+    7100  FINE_PT   PROX_OPS      13.4   50.000   -16.81  -11.19   -0.00   -2.092  -1.393  -0.000   0.000    0.01
+    7110  FINE_PT   PROX_OPS       8.1   50.000   -17.13  -11.37   -0.00    2.593   1.721   0.000   0.000    0.06
+    7120  FINE_PT   PROX_OPS      10.0   50.000   -17.02  -11.26   -0.00   -1.320  -0.874  -0.000   0.000    0.03
+    7130  FINE_PT   PROX_OPS      13.4   50.000   -16.82  -11.09   -0.00   -2.093  -1.381  -0.000   0.000    0.07
+    7140  FINE_PT   PROX_OPS      13.5   50.000   -16.81  -11.06   -0.00   -2.125  -1.398  -0.000   0.000    0.02
+    7150  FINE_PT   PROX_OPS       8.1   50.000   -17.14  -11.24   -0.00    2.592   1.700   0.000   0.000    0.06
+    7160  FINE_PT   PROX_OPS       9.2   50.000   -17.07  -11.16   -0.00    2.577   1.685   0.000   0.000    0.01
+    7170  FINE_PT   PROX_OPS      10.0   50.000   -17.03  -11.10   -0.00    2.568   1.674   0.000   0.000    0.03
+    7180  FINE_PT   PROX_OPS      10.4   50.000   -17.00  -11.05   -0.00   -1.435  -0.933  -0.000   0.000    0.04
+    7190  FINE_PT   PROX_OPS      12.3   50.000   -16.89  -10.95   -0.00   -1.879  -1.218  -0.000   0.000    0.02
+    7200  FINE_PT   PROX_OPS      13.4   50.000   -16.82  -10.87   -0.00   -2.131  -1.377  -0.000   0.000    0.02
+    7210  FINE_PT   PROX_OPS      14.1   50.000   -16.78  -10.81   -0.00   -2.283  -1.471  -0.000   0.000    0.01
+    7220  FINE_PT   PROX_OPS       8.0   50.000   -17.16  -11.02   -0.00    2.590   1.664   0.000   0.000    0.06
+    7230  FINE_PT   PROX_OPS       9.1   50.000   -17.09  -10.94   -0.00    2.576   1.649   0.000   0.000    0.03
+    7240  FINE_PT   PROX_OPS       9.8   50.000   -17.05  -10.88   -0.00    2.567   1.639   0.000   0.000    0.05
+    7250  FINE_PT   PROX_OPS      10.3   50.000   -17.02  -10.83   -0.00   -1.431  -0.911  -0.000   0.000    0.04
+    7260  FINE_PT   PROX_OPS      12.1   50.000   -16.91  -10.73   -0.00   -1.878  -1.192  -0.000   0.000    0.07
+    7270  FINE_PT   PROX_OPS      13.2   50.000   -16.84  -10.66   -0.00   -2.131  -1.348  -0.000   0.000    0.06
+    7280  FINE_PT   PROX_OPS      13.9   50.000   -16.80  -10.60   -0.00   -2.284  -1.441  -0.000   0.000    0.06
+    7290  FINE_PT   PROX_OPS       7.9   50.000   -17.17  -10.80   -0.00    2.588   1.628   0.000   0.000    0.03
+    7300  FINE_PT   PROX_OPS       9.0   50.000   -17.11  -10.72   -0.00    2.574   1.614   0.000   0.000    0.04
+    7310  FINE_PT   PROX_OPS       9.7   50.000   -17.06  -10.67   -0.00    2.565   1.603   0.000   0.000    0.05
+    7320  FINE_PT   PROX_OPS      10.1   50.000   -17.04  -10.62   -0.00   -1.426  -0.889  -0.000   0.000    0.02
+    7330  FINE_PT   PROX_OPS      12.0   50.000   -16.92  -10.51   -0.00   -1.877  -1.166  -0.000   0.000    0.02
+    7340  FINE_PT   PROX_OPS      13.1   50.000   -16.86  -10.44   -0.00   -2.131  -1.320  -0.000   0.000    0.07
+    7350  FINE_PT   PROX_OPS      13.8   50.000   -16.82  -10.38   -0.00   -2.284  -1.410  -0.000   0.000    0.07
+    7360  FINE_PT   PROX_OPS       7.8   50.000   -17.19  -10.58   -0.00    2.586   1.592   0.000   0.000    0.03
+    7370  FINE_PT   PROX_OPS       8.9   50.000   -17.12  -10.51   -0.00    2.572   1.578   0.000   0.000    0.04
+    7380  FINE_PT   PROX_OPS       9.6   50.000   -17.08  -10.45   -0.00    2.563   1.568   0.000   0.000    0.03
+    7390  FINE_PT   PROX_OPS      10.0   50.000   -17.05  -10.40   -0.00   -1.421  -0.867  -0.000   0.000    0.06
+    7400  FINE_PT   PROX_OPS       8.9   50.000   -17.12  -10.41   -0.00    2.570   1.562   0.000   0.000    0.05
+    7410  FINE_PT   PROX_OPS      10.0   50.000   -17.05  -10.34   -0.00   -1.430  -0.867  -0.000   0.000    0.04
+    7420  FINE_PT   PROX_OPS      12.0   50.000   -16.93  -10.23   -0.00   -1.917  -1.159  -0.000   0.000    0.03
+    7430  FINE_PT   PROX_OPS       8.9   50.000   -17.12  -10.32   -0.00    2.568   1.547   0.000   0.000    0.01
+    7440  FINE_PT   PROX_OPS      13.0   50.000   -16.87  -10.13   -0.00   -2.155  -1.295  -0.000   0.000    0.02
+    7450  FINE_PT   PROX_OPS       9.5   50.000   -17.09  -10.23   -0.00    2.559   1.532   0.000   0.000    0.02
+    7460  FINE_PT   PROX_OPS      13.6   50.000   -16.83  -10.05   -0.00   -2.298  -1.372  -0.000   0.000    0.02
+    7470  FINE_PT   PROX_OPS       9.9   50.000   -17.06  -10.15   -0.00    2.553   1.519   0.000   0.000    0.02
+    7480  FINE_PT   PROX_OPS      14.0   50.000   -16.81   -9.97   -0.00   -2.386  -1.416  -0.000   0.000    0.02
+    7490  FINE_PT   PROX_OPS      10.1   50.000   -17.05  -10.08   -0.00   -1.492  -0.882  -0.000   0.000    0.07
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    7500  FINE_PT   PROX_OPS       7.7   50.000   -17.20  -10.14   -0.00    2.579   1.520   0.000   0.000    0.05
+    7510  FINE_PT   PROX_OPS      11.8   50.000   -16.94   -9.96   -0.00   -1.914  -1.125  -0.000   0.000    0.05
+    7520  FINE_PT   PROX_OPS       8.8   50.000   -17.14  -10.04   -0.00    2.565   1.502   0.000   0.000    0.06
+    7530  FINE_PT   PROX_OPS      12.8   50.000   -16.88   -9.86   -0.00   -2.153  -1.258  -0.000   0.000    0.02
+    7540  FINE_PT   PROX_OPS       9.4   50.000   -17.10   -9.95   -0.00    2.556   1.488   0.000   0.000    0.05
+    7550  FINE_PT   PROX_OPS      13.4   50.000   -16.84   -9.78   -0.00   -2.296  -1.333  -0.000   0.000    0.01
+    7560  FINE_PT   PROX_OPS       9.7   50.000   -17.08   -9.88   -0.00    2.549   1.475   0.000   0.000    0.03
+    7570  FINE_PT   PROX_OPS      10.0   50.000   -17.06   -9.84   -0.00   -1.489  -0.859  -0.000   0.000    0.03
+    7580  FINE_PT   PROX_OPS       7.7   50.000   -17.20   -9.89   -0.00    2.574   1.480   0.000   0.000    0.08
+    7590  FINE_PT   PROX_OPS      11.8   50.000   -16.95   -9.71   -0.00   -1.936  -1.109  -0.000   0.000    0.03
+    7600  FINE_PT   PROX_OPS       8.7   50.000   -17.14   -9.79   -0.00    2.560   1.462   0.000   0.000    0.05
+    7610  FINE_PT   PROX_OPS      12.7   50.000   -16.89   -9.62   -0.00   -2.166  -1.233  -0.000   0.000    0.01
+    7620  FINE_PT   PROX_OPS       9.3   50.000   -17.10   -9.71   -0.00    2.551   1.448   0.000   0.000    0.03
+    7630  FINE_PT   PROX_OPS      13.3   50.000   -16.85   -9.53   -0.00   -2.303  -1.304  -0.000   0.000    0.06
+    7640  FINE_PT   PROX_OPS       9.6   50.000   -17.08   -9.63   -0.00    2.545   1.436   0.000   0.000    0.03
+    7650  FINE_PT   PROX_OPS      13.6   50.000   -16.83   -9.46   -0.00   -2.388  -1.343  -0.000   0.000    0.02
+    7660  FINE_PT   PROX_OPS       8.6   50.000   -17.14   -9.61   -0.00    2.556   1.433   0.000   0.000    0.04
+    7670  FINE_PT   PROX_OPS      14.0   50.000   -16.80   -9.39   -0.00   -2.475  -1.383  -0.000   0.000    0.09
+    7680  FINE_PT   PROX_OPS      13.6   50.000   -16.83   -9.37   -0.00   -2.390  -1.331  -0.000   0.000    0.01
+    7690  FINE_PT   PROX_OPS      12.6   50.000   -16.89   -9.38   -0.00   -2.171  -1.206  -0.000   0.000    0.04
+    7700  FINE_PT   PROX_OPS      10.0   50.000   -17.05   -9.44   -0.00   -1.543  -0.854  -0.000   0.000    0.02
+    7710  FINE_PT   PROX_OPS       9.8   50.000   -17.07   -9.41   -0.00    2.538   1.400   0.000   0.000    0.01
+    7720  FINE_PT   PROX_OPS      12.6   50.000   -16.89   -9.29   -0.00   -2.175  -1.196  -0.000   0.000    0.05
+    7730  FINE_PT   PROX_OPS      13.9   50.000   -16.80   -9.21   -0.00   -2.494  -1.367  -0.000   0.000    0.06
+    7740  FINE_PT   PROX_OPS       9.7   50.000   -17.07   -9.32   -0.00    2.536   1.385   0.000   0.000    0.02
+    7750  FINE_PT   PROX_OPS       9.8   50.000   -17.06   -9.29   -0.00    2.534   1.380   0.000   0.000    0.07
+    7760  FINE_PT   PROX_OPS       9.7   50.000   -17.07   -9.26   -0.00    2.535   1.376   0.000   0.000    0.03
+    7770  FINE_PT   PROX_OPS      13.9   50.000   -16.80   -9.09   -0.00   -2.505  -1.355  -0.000   0.000    0.04
+    7780  FINE_PT   PROX_OPS      10.0   50.000   -17.05   -9.19   -0.00    2.530   1.364   0.000   0.000    0.03
+    7790  FINE_PT   PROX_OPS      11.5   50.000   -16.95   -9.11   -0.00   -1.961  -1.054  -0.000   0.000    0.04
+    7800  FINE_PT   PROX_OPS      10.0   50.000   -17.04   -9.13   -0.00    2.528   1.354   0.000   0.000    0.03
+    7810  FINE_PT   PROX_OPS      10.0   50.000   -17.04   -9.10   -0.00    2.527   1.349   0.000   0.000    0.06
+    7820  FINE_PT   PROX_OPS      10.0   50.000   -17.04   -9.07   -0.00    2.526   1.344   0.000   0.000    0.01
+    7830  FINE_PT   PROX_OPS       9.9   50.000   -17.04   -9.04   -0.00    2.526   1.340   0.000   0.000    0.03
+    7840  FINE_PT   PROX_OPS       9.9   50.000   -17.04   -9.01   -0.00    2.525   1.335   0.000   0.000    0.04
+    7850  FINE_PT   PROX_OPS       9.9   50.000   -17.04   -8.98   -0.00    2.524   1.330   0.000   0.000    0.06
+    7860  FINE_PT   PROX_OPS       9.9   50.000   -17.04   -8.95   -0.00    2.524   1.325   0.000   0.000    0.05
+    7870  FINE_PT   PROX_OPS       9.9   50.000   -17.04   -8.92   -0.00    2.523   1.321   0.000   0.000    0.01
+    7880  FINE_PT   PROX_OPS       9.8   50.000   -17.04   -8.89   -0.00    2.522   1.316   0.000   0.000    0.03
+    7890  FINE_PT   PROX_OPS       9.8   50.000   -17.04   -8.86   -0.00    2.521   1.311   0.000   0.000    0.02
+    7900  FINE_PT   PROX_OPS       9.8   50.000   -17.04   -8.83   -0.00    2.521   1.307   0.000   0.000    0.05
+    7910  FINE_PT   PROX_OPS       9.8   50.000   -17.04   -8.80   -0.00    2.520   1.302   0.000   0.000    0.03
+    7920  FINE_PT   PROX_OPS       9.8   50.000   -17.04   -8.78   -0.00    2.519   1.297   0.000   0.000    0.01
+    7930  FINE_PT   PROX_OPS       9.7   50.000   -17.04   -8.75   -0.00    2.519   1.292   0.000   0.000    0.06
+    7940  FINE_PT   PROX_OPS       9.7   50.000   -17.04   -8.72   -0.00    2.518   1.288   0.000   0.000    0.02
+    7950  FINE_PT   PROX_OPS       9.7   50.000   -17.04   -8.69   -0.00    2.517   1.283   0.000   0.000    0.01
+    7960  FINE_PT   PROX_OPS       9.7   50.000   -17.04   -8.66   -0.00    2.516   1.278   0.000   0.000    0.03
+    7970  FINE_PT   PROX_OPS       9.7   50.000   -17.04   -8.63   -0.00    2.516   1.274   0.000   0.000    0.02
+    7980  FINE_PT   PROX_OPS       9.6   50.000   -17.04   -8.60   -0.00    2.515   1.269   0.000   0.000    0.02
+    7990  FINE_PT   PROX_OPS       9.6   50.000   -17.04   -8.57   -0.00    2.514   1.264   0.000   0.000    0.06
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    8000  FINE_PT   PROX_OPS       9.6   50.000   -17.04   -8.54   -0.00    2.513   1.260   0.000   0.000    0.03
+    8010  FINE_PT   PROX_OPS       9.6   50.000   -17.04   -8.51   -0.00    2.513   1.255   0.000   0.000    0.02
+    8020  FINE_PT   PROX_OPS       9.6   50.000   -17.03   -8.48   -0.00    2.512   1.250   0.000   0.000    0.03
+    8030  FINE_PT   PROX_OPS       9.6   50.000   -17.03   -8.45   -0.00    2.511   1.246   0.000   0.000    0.02
+    8040  FINE_PT   PROX_OPS       9.5   50.000   -17.03   -8.42   -0.00    2.510   1.241   0.000   0.000    0.07
+    8050  FINE_PT   PROX_OPS       9.5   50.000   -17.03   -8.39   -0.00    2.509   1.237   0.000   0.000    0.02
+    8060  FINE_PT   PROX_OPS       9.5   50.000   -17.03   -8.36   -0.00    2.509   1.232   0.000   0.000    0.03
+    8070  FINE_PT   PROX_OPS       9.5   50.000   -17.03   -8.33   -0.00    2.508   1.227   0.000   0.000    0.06
+    8080  FINE_PT   PROX_OPS       9.5   50.000   -17.03   -8.30   -0.00    2.507   1.223   0.000   0.000    0.04
+    8090  FINE_PT   PROX_OPS       9.4   50.000   -17.03   -8.28   -0.00    2.506   1.218   0.000   0.000    0.04
+    8100  FINE_PT   PROX_OPS       9.4   50.000   -17.03   -8.25   -0.00    2.505   1.213   0.000   0.000    0.06
+    8110  FINE_PT   PROX_OPS       9.4   50.000   -17.03   -8.22   -0.00    2.504   1.209   0.000   0.000    0.05
+    8120  FINE_PT   PROX_OPS       9.4   50.000   -17.02   -8.19   -0.00    2.504   1.204   0.000   0.000    0.05
+    8130  FINE_PT   PROX_OPS       9.4   50.000   -17.02   -8.16   -0.00    2.503   1.200   0.000   0.000    0.05
+    8140  FINE_PT   PROX_OPS       9.4   50.000   -17.02   -8.13   -0.00    2.502   1.195   0.000   0.000    0.04
+    8150  FINE_PT   PROX_OPS       9.3   50.000   -17.02   -8.10   -0.00    2.501   1.190   0.000   0.000    0.05
+    8160  FINE_PT   PROX_OPS       9.3   50.000   -17.02   -8.07   -0.00    2.500   1.186   0.000   0.000    0.07
+    8170  FINE_PT   PROX_OPS       9.3   50.000   -17.02   -8.04   -0.00    2.499   1.181   0.000   0.000    0.08
+    8180  FINE_PT   PROX_OPS       9.3   50.000   -17.02   -8.01   -0.00    2.498   1.177   0.000   0.000    0.06
+    8190  FINE_PT   PROX_OPS       9.3   50.000   -17.01   -7.98   -0.00    2.498   1.172   0.000   0.000    0.05
+    8200  FINE_PT   PROX_OPS       9.2   50.000   -17.01   -7.96   -0.00    2.497   1.167   0.000   0.000    0.03
+    8210  FINE_PT   PROX_OPS       9.2   50.000   -17.01   -7.93   -0.00    2.496   1.163   0.000   0.000    0.01
+    8220  FINE_PT   PROX_OPS       9.2   50.000   -17.01   -7.90   -0.00    2.495   1.158   0.000   0.000    0.03
+    8230  FINE_PT   PROX_OPS       9.2   50.000   -17.01   -7.87   -0.00    2.494   1.154   0.000   0.000    0.06
+    8240  FINE_PT   PROX_OPS       9.2   50.000   -17.01   -7.84   -0.00    2.493   1.149   0.000   0.000    0.02
+    8250  FINE_PT   PROX_OPS       9.2   50.000   -17.00   -7.81   -0.00    2.492   1.145   0.000   0.000    0.10
+    8260  FINE_PT   PROX_OPS       9.1   50.000   -17.00   -7.78   -0.00    2.491   1.140   0.000   0.000    0.02
+    8270  FINE_PT   PROX_OPS       9.1   50.000   -17.00   -7.75   -0.00    2.490   1.136   0.000   0.000    0.04
+    8280  FINE_PT   PROX_OPS       9.1   50.000   -17.00   -7.72   -0.00    2.489   1.131   0.000   0.000    0.07
+    8290  FINE_PT   PROX_OPS       9.1   50.000   -17.00   -7.70   -0.00    2.488   1.127   0.000   0.000    0.02
+    8300  FINE_PT   PROX_OPS       9.1   50.000   -16.99   -7.67   -0.00    2.487   1.122   0.000   0.000    0.02
+    8310  FINE_PT   PROX_OPS       9.0   50.000   -16.99   -7.64   -0.00    2.486   1.118   0.000   0.000    0.04
+    8320  FINE_PT   PROX_OPS       9.0   50.000   -16.99   -7.61   -0.00    2.485   1.113   0.000   0.000    0.06
+    8330  FINE_PT   PROX_OPS       9.0   50.000   -16.99   -7.58   -0.00    2.484   1.109   0.000   0.000    0.08
+    8340  FINE_PT   PROX_OPS       9.0   50.000   -16.99   -7.55   -0.00    2.484   1.104   0.000   0.000    0.03
+    8350  FINE_PT   PROX_OPS       9.0   50.000   -16.98   -7.52   -0.00    2.483   1.100   0.000   0.000    0.05
+    8360  FINE_PT   PROX_OPS       9.0   50.000   -16.98   -7.49   -0.00    2.482   1.095   0.000   0.000    0.01
+    8370  FINE_PT   PROX_OPS       8.9   50.000   -16.98   -7.47   -0.00    2.481   1.091   0.000   0.000    0.01
+    8380  FINE_PT   PROX_OPS       8.9   50.000   -16.98   -7.44   -0.00    2.480   1.086   0.000   0.000    0.03
+    8390  FINE_PT   PROX_OPS       8.9   50.000   -16.98   -7.41   -0.00    2.479   1.082   0.000   0.000    0.07
+    8400  FINE_PT   PROX_OPS       8.9   50.000   -16.97   -7.38   -0.00    2.478   1.077   0.000   0.000    0.04
+    8410  FINE_PT   PROX_OPS       8.9   50.000   -16.97   -7.35   -0.00    2.476   1.073   0.000   0.000    0.06
+    8420  FINE_PT   PROX_OPS       8.8   50.000   -16.97   -7.32   -0.00    2.475   1.068   0.000   0.000    0.06
+    8430  FINE_PT   PROX_OPS       8.8   50.000   -16.97   -7.29   -0.00    2.474   1.064   0.000   0.000    0.02
+    8440  FINE_PT   PROX_OPS       8.8   50.000   -16.96   -7.27   -0.00    2.473   1.059   0.000   0.000    0.04
+    8450  FINE_PT   PROX_OPS       8.8   50.000   -16.96   -7.24   -0.00    2.472   1.055   0.000   0.000    0.05
+    8460  FINE_PT   PROX_OPS       8.8   50.000   -16.96   -7.21   -0.00    2.471   1.050   0.000   0.000    0.05
+    8470  FINE_PT   PROX_OPS       8.8   50.000   -16.96   -7.18   -0.00    2.470   1.046   0.000   0.000    0.07
+    8480  FINE_PT   PROX_OPS       8.7   50.000   -16.95   -7.15   -0.00    2.469   1.042   0.000   0.000    0.06
+    8490  FINE_PT   PROX_OPS       8.7   50.000   -16.95   -7.12   -0.00    2.468   1.037   0.000   0.000    0.04
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+    8500  FINE_PT   PROX_OPS       8.7   50.000   -16.95   -7.09   -0.00    2.467   1.033   0.000   0.000    0.05
+    8510  FINE_PT   PROX_OPS       8.7   50.000   -16.94   -7.07   -0.00    2.466   1.028   0.000   0.000    0.06
+    8520  FINE_PT   PROX_OPS       8.7   50.000   -16.94   -7.04   -0.00    2.465   1.024   0.000   0.000    0.01
+    8530  FINE_PT   PROX_OPS       8.7   50.000   -16.94   -7.01   -0.00    2.464   1.020   0.000   0.000    0.03
+    8540  FINE_PT   PROX_OPS       8.6   50.000   -16.94   -6.98   -0.00    2.463   1.015   0.000   0.000    0.01
+    8550  FINE_PT   PROX_OPS       8.6   50.000   -16.93   -6.95   -0.00    2.462   1.011   0.000   0.000    0.03
+    8560  FINE_PT   PROX_OPS       8.6   50.000   -16.93   -6.92   -0.00    2.461   1.006   0.000   0.000    0.03
+    8570  FINE_PT   PROX_OPS       8.6   50.000   -16.93   -6.90   -0.00    2.459   1.002   0.000   0.000    0.03
+    8580  FINE_PT   PROX_OPS       8.6   50.000   -16.92   -6.87   -0.00    2.458   0.998   0.000   0.000    0.03
+    8590  FINE_PT   PROX_OPS       8.6   50.000   -16.92   -6.84   -0.00    2.457   0.993   0.000   0.000    0.03
+    8600  FINE_PT   PROX_OPS       8.5   50.000   -16.92   -6.81   -0.00    2.456   0.989   0.000   0.000    0.03
+    8610  FINE_PT   PROX_OPS       8.5   50.000   -16.92   -6.78   -0.00    2.455   0.985   0.000   0.000    0.04
+    8620  FINE_PT   PROX_OPS       8.5   50.000   -16.91   -6.76   -0.00    2.454   0.980   0.000   0.000    0.05
+    8630  FINE_PT   PROX_OPS       8.5   50.000   -16.91   -6.73   -0.00    2.453   0.976   0.000   0.000    0.01
+    8640  FINE_PT   PROX_OPS       8.5   50.000   -16.91   -6.70   -0.00    2.452   0.971   0.000   0.000    0.07
+    8650  FINE_PT   PROX_OPS       8.5   50.000   -16.90   -6.67   -0.00    2.450   0.967   0.000   0.000    0.06
+    8660  FINE_PT   PROX_OPS       8.4   50.000   -16.90   -6.64   -0.00    2.449   0.963   0.000   0.000    0.02
+    8670  FINE_PT   PROX_OPS       8.4   50.000   -16.90   -6.62   -0.00    2.448   0.958   0.000   0.000    0.03
+    8680  FINE_PT   PROX_OPS       8.4   50.000   -16.89   -6.59   -0.00    2.447   0.954   0.000   0.000    0.02
+    8690  FINE_PT   PROX_OPS       8.4   50.000   -16.89   -6.56   -0.00    2.446   0.950   0.000   0.000    0.02
+    8700  FINE_PT   PROX_OPS       8.4   50.000   -16.89   -6.53   -0.00    2.445   0.946   0.000   0.000    0.05
+    8710  FINE_PT   PROX_OPS       8.4   50.000   -16.88   -6.50   -0.00    2.443   0.941   0.000   0.000    0.01
+    8720  FINE_PT   PROX_OPS       8.3   50.000   -16.88   -6.48   -0.00    2.442   0.937   0.000   0.000    0.05
+    8730  FINE_PT   PROX_OPS       8.3   50.000   -16.88   -6.45   -0.00    2.441   0.933   0.000   0.000    0.03
+    8740  FINE_PT   PROX_OPS       8.3   50.000   -16.87   -6.42   -0.00    2.440   0.928   0.000   0.000    0.02
+    8750  FINE_PT   PROX_OPS       8.3   50.000   -16.87   -6.39   -0.00    2.439   0.924   0.000   0.000    0.06
+    8760  FINE_PT   PROX_OPS       8.3   50.000   -16.86   -6.36   -0.00    2.437   0.920   0.000   0.000    0.02
+    8770  FINE_PT   PROX_OPS       8.3   50.000   -16.86   -6.34   -0.00    2.436   0.915   0.000   0.000    0.01
+    8780  FINE_PT   PROX_OPS       8.2   50.000   -16.86   -6.31   -0.00    2.435   0.911   0.000   0.000    0.01
+    8790  FINE_PT   PROX_OPS       8.2   50.000   -16.85   -6.28   -0.00    2.434   0.907   0.000   0.000    0.02
+    8800  FINE_PT   PROX_OPS       8.2   50.000   -16.85   -6.25   -0.00    2.432   0.903   0.000   0.000    0.01
+    8810  FINE_PT   PROX_OPS       8.2   50.000   -16.85   -6.23   -0.00    2.431   0.898   0.000   0.000    0.05
+    8820  FINE_PT   PROX_OPS       8.2   50.000   -16.84   -6.20   -0.00    2.430   0.894   0.000   0.000    0.03
+    8830  FINE_PT   PROX_OPS       8.2   50.000   -16.84   -6.17   -0.00    2.429   0.890   0.000   0.000    0.01
+    8840  FINE_PT   PROX_OPS       8.1   50.000   -16.83   -6.14   -0.00    2.427   0.886   0.000   0.000    0.02
+    8850  FINE_PT   PROX_OPS       8.1   50.000   -16.83   -6.11   -0.00    2.426   0.881   0.000   0.000    0.03
+    8860  FINE_PT   PROX_OPS       8.1   50.000   -16.83   -6.09   -0.00    2.425   0.877   0.000   0.000    0.01
+    8870  FINE_PT   PROX_OPS       8.1   50.000   -16.82   -6.06   -0.00    2.424   0.873   0.000   0.000    0.02
+    8880  FINE_PT   PROX_OPS       8.1   50.000   -16.82   -6.03   -0.00    2.422   0.869   0.000   0.000    0.06
+    8890  FINE_PT   PROX_OPS       8.1   50.000   -16.81   -6.00   -0.00    2.421   0.865   0.000   0.000    0.02
+    8900  FINE_PT   PROX_OPS       8.0   50.000   -16.81   -5.98   -0.00    2.420   0.860   0.000   0.000    0.09
+    8910  FINE_PT   PROX_OPS       8.0   50.000   -16.81   -5.95   -0.00    2.418   0.856   0.000   0.000    0.04
+    8920  FINE_PT   PROX_OPS       8.0   50.000   -16.80   -5.92   -0.00    2.417   0.852   0.000   0.000    0.02
+    8930  FINE_PT   PROX_OPS       8.0   50.000   -16.80   -5.89   -0.00    2.416   0.848   0.000   0.000    0.02
+    8940  FINE_PT   PROX_OPS       8.0   50.000   -16.79   -5.87   -0.00    2.415   0.844   0.000   0.000    0.04
+    8950  FINE_PT   PROX_OPS       8.0   50.000   -16.79   -5.84   -0.00    2.413   0.839   0.000   0.000    0.02
+    8960  FINE_PT   PROX_OPS       7.9   50.000   -16.78   -5.81   -0.00    2.412   0.835   0.000   0.000    0.02
+    8970  FINE_PT   PROX_OPS       7.9   50.000   -16.78   -5.78   -0.00    2.411   0.831   0.000   0.000    0.05
+    8980  FINE_PT   PROX_OPS       7.9   50.000   -16.78   -5.76   -0.00    2.409   0.827   0.000   0.000    0.03
+    8990  FINE_PT   PROX_OPS       7.9   50.000   -16.77   -5.73   -0.00    2.408   0.823   0.000   0.000    0.01
+  Wall time: 231575ms for 900000 ticks (0.257ms/tick)
+
+  Min range achieved: 7.72m
+  Final range:        349.17m
+  RPOD started at:    0s
+  TERMINAL: not reached
+  DOCKED: not reached
+    FAIL FAIL -- RPOD closes range below 0.8m (min=7.72m)
+    FAIL FAIL -- RPOD reaches TERMINAL or DOCKED mode
+  Max pointing error (all time):      178.76deg
+  Settled pointing error (final 10%): 0.10deg
+    PASS PASS -- pointing settles below 10.0deg (settled=0.10deg  peak=178.76deg)
+
+Scenario 3: Momentum Dump Cycle
+
+----------------------------------------------------------
+  Scenario: MomentumDump
+----------------------------------------------------------
+  ClosedLoopPlant: PhysicsPlantSim (I_diag=[4167. 4167. 3000.] g.m2, |B|=40�T, tau_max=2mN.m)
+  [t=    0.0s] FSW -1       -> SUN_ACQ   rng=1999.7m  pstd_y=0.300m  omega=0.114deg/s  pt=0.0deg
+  [t=    0.0s] RPOD -1       -> PROX_OPS  rng=1999.7m  pstd_y=0.300m  vel=[-0.03,1.00,0.03]mm/s  accel=[0.033,-20.000,-0.029]mm/s2
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+       0  SUN_ACQ   PROX_OPS    1999.7    0.300    -0.03    1.00    0.03    0.033 -20.000  -0.029   0.114    0.00
+  [t=    0.0s] FSW SUN_ACQ  -> FINE_PT   rng=1999.7m  pstd_y=0.300m  omega=0.114deg/s  pt=0.5deg
+      10  FINE_PT   PROX_OPS     212.0    5.009     0.05 -129.30   -1.01    0.002  -0.186  -0.121   0.088    0.84
+      20  FINE_PT   PROX_OPS     209.3   10.005    -0.11 -129.41   -1.54    0.002   0.008  -0.016   0.065    1.79
+      30  FINE_PT   PROX_OPS     209.0   15.003    -0.28 -129.34   -1.60    0.002   0.008  -0.001   0.048    2.32
+      40  FINE_PT   PROX_OPS     208.8   20.002    -0.45 -129.26   -1.60    0.002   0.008   0.001   0.038    2.74
+      50  FINE_PT   PROX_OPS     208.5   25.002    -0.62 -129.18   -1.59    0.002   0.008   0.001   0.032    2.99
+      60  FINE_PT   PROX_OPS     208.3   30.002    -0.79 -129.11   -1.59    0.002   0.008   0.001   0.028    3.38
+      70  FINE_PT   PROX_OPS     208.0   35.001    -0.95 -129.03   -1.58    0.002   0.008   0.001   0.026    3.62
+      80  FINE_PT   PROX_OPS     207.8   40.001    -1.12 -128.95   -1.57    0.002   0.008   0.001   0.025    3.87
+      90  FINE_PT   PROX_OPS     207.5   45.001    -1.29 -128.87   -1.56    0.002   0.008   0.001   0.025    4.12
+     100  FINE_PT   PROX_OPS     207.3   50.001    -1.46 -128.79   -1.55    0.002   0.008   0.001   0.026    4.42
+     110  FINE_PT   PROX_OPS     207.0   50.000    -1.62 -128.72   -1.54    0.002   0.008   0.001   0.026    4.72
+     120  FINE_PT   PROX_OPS     206.8   50.000    -1.79 -128.64   -1.53    0.002   0.008   0.001   0.028    4.91
+     130  FINE_PT   PROX_OPS     206.6   50.000    -1.96 -128.56   -1.52    0.002   0.008   0.001   0.029    5.17
+     140  FINE_PT   PROX_OPS     206.3   50.000    -2.12 -128.48   -1.52    0.002   0.008   0.001   0.030    5.50
+     150  FINE_PT   PROX_OPS     206.1   50.000    -2.29 -128.40   -1.51    0.002   0.008   0.001   0.032    5.89
+     160  FINE_PT   PROX_OPS     205.8   50.000    -2.45 -128.32   -1.50    0.002   0.008   0.001   0.033    6.12
+     170  FINE_PT   PROX_OPS     205.6   50.000    -2.62 -128.24   -1.49    0.002   0.008   0.001   0.035    6.53
+     180  FINE_PT   PROX_OPS     205.3   50.000    -2.78 -128.17   -1.48    0.002   0.008   0.001   0.037    6.92
+     190  FINE_PT   PROX_OPS     205.1   50.000    -2.95 -128.09   -1.47    0.002   0.008   0.001   0.039    7.22
+     200  FINE_PT   PROX_OPS     204.8   50.000    -3.11 -128.01   -1.47    0.002   0.008   0.001   0.041    7.63
+     210  FINE_PT   PROX_OPS     204.6   50.000    -3.28 -127.93   -1.46    0.002   0.008   0.001   0.043    8.13
+     220  FINE_PT   PROX_OPS     204.4   50.000    -3.44 -127.85   -1.45    0.002   0.008   0.001   0.046    8.49
+     230  FINE_PT   PROX_OPS     204.1   50.000    -3.61 -127.77   -1.44    0.002   0.008   0.001   0.048    8.99
+     240  FINE_PT   PROX_OPS     203.9   50.000    -3.77 -127.69   -1.43    0.002   0.007   0.001   0.051    9.49
+     250  FINE_PT   PROX_OPS     203.6   50.000    -3.93 -127.61   -1.42    0.002   0.007   0.001   0.054    9.97
+     260  FINE_PT   PROX_OPS     203.4   50.000    -4.10 -127.52   -1.42    0.002   0.007   0.001   0.057   10.57
+     270  FINE_PT   PROX_OPS     203.2   50.000    -4.26 -127.44   -1.41    0.002   0.007   0.001   0.060   11.14
+     280  FINE_PT   PROX_OPS     202.9   50.000    -4.42 -127.36   -1.40    0.002   0.007   0.001   0.063   11.78
+     290  FINE_PT   PROX_OPS     202.7   50.000    -4.59 -127.28   -1.39    0.002   0.007   0.001   0.066   12.37
+     300  FINE_PT   PROX_OPS     202.4   50.000    -4.75 -127.20   -1.38    0.002   0.007   0.001   0.070   13.10
+     310  FINE_PT   PROX_OPS     202.2   50.000    -4.91 -127.12   -1.38    0.002   0.007   0.001   0.074   13.85
+     320  FINE_PT   PROX_OPS     202.0   50.000    -5.07 -127.04   -1.37    0.002   0.007   0.001   0.078   14.53
+     330  FINE_PT   PROX_OPS     201.7   50.000    -5.24 -126.95   -1.36    0.002   0.007   0.001   0.082   15.34
+     340  FINE_PT   PROX_OPS     201.5   50.000    -5.40 -126.87   -1.35    0.002   0.007   0.001   0.087   16.18
+     350  FINE_PT   PROX_OPS     201.2   50.000    -5.56 -126.79   -1.34    0.002   0.007   0.001   0.091   17.08
+     360  FINE_PT   PROX_OPS     201.0   50.000    -5.72 -126.71   -1.34    0.002   0.007   0.001   0.096   18.08
+     370  FINE_PT   PROX_OPS     200.8   50.000    -5.88 -126.63   -1.33    0.002   0.007   0.001   0.102   18.99
+     380  FINE_PT   PROX_OPS     200.5   50.000    -6.04 -126.54   -1.32    0.002   0.007   0.001   0.107   20.09
+     390  FINE_PT   PROX_OPS     200.3   50.000    -6.20 -126.46   -1.31    0.002   0.007   0.001   0.113   21.18
+     400  FINE_PT   PROX_OPS     200.0   50.000    -6.36 -126.38   -1.31    0.002   0.007   0.001   0.119   22.35
+     410  FINE_PT   PROX_OPS     199.8   50.000    -6.52 -126.29   -1.30    0.002   0.007   0.001   0.126   23.55
+     420  FINE_PT   PROX_OPS     199.6   50.000    -6.68 -126.21   -1.29    0.002   0.007   0.001   0.132   24.86
+     430  FINE_PT   PROX_OPS     199.3   50.000    -6.84 -126.13   -1.28    0.002   0.007   0.001   0.140   26.20
+     440  FINE_PT   PROX_OPS     199.1   50.000    -7.00 -126.04   -1.28    0.002   0.007   0.001   0.147   27.58
+     450  FINE_PT   PROX_OPS     198.9   50.000    -7.16 -125.96   -1.27    0.002   0.007   0.001   0.155   29.13
+     460  FINE_PT   PROX_OPS     198.6   50.000    -7.32 -125.87   -1.26    0.002   0.007   0.001   0.163   30.71
+     470  FINE_PT   PROX_OPS     198.4   50.000    -7.48 -125.79   -1.26    0.002   0.007   0.001   0.172   32.38
+     480  FINE_PT   PROX_OPS     198.2   50.000    -7.63 -125.71   -1.25    0.002   0.007   0.001   0.181   34.14
+     490  FINE_PT   PROX_OPS     197.9   50.000    -7.79 -125.62   -1.24    0.002   0.007   0.001   0.191   36.01
+    t(s)  mode      rpod       rng_ekf   pstd_y       vx      vy      vz       ax      ay      az   omega  pt_err
+  -------------------------------------------------------------------------------------------------------------------
+     500  FINE_PT   PROX_OPS     197.7   50.000    -7.95 -125.54   -1.23    0.002   0.007   0.001   0.201   37.98
+     510  FINE_PT   PROX_OPS     197.4   50.000    -8.11 -125.45   -1.23    0.002   0.007   0.001   0.211   40.07
+     520  FINE_PT   PROX_OPS     197.2   50.000    -8.27 -125.37   -1.22    0.002   0.007   0.001   0.222   42.22
+     530  FINE_PT   PROX_OPS     197.0   50.000    -8.42 -125.28   -1.21    0.002   0.007   0.001   0.234   44.46
+     540  FINE_PT   PROX_OPS     196.7   50.000    -8.58 -125.20   -1.21    0.002   0.007   0.001   0.246   46.93
+     550  FINE_PT   PROX_OPS     196.5   50.000    -8.74 -125.11   -1.20    0.002   0.007   0.001   0.259   49.42
+     560  FINE_PT   PROX_OPS     196.3   50.000    -8.89 -125.02   -1.19    0.002   0.007   0.001   0.272   52.04
+     570  FINE_PT   PROX_OPS     196.0   50.000    -9.05 -124.94   -1.18    0.002   0.007   0.001   0.286   54.84
+     580  FINE_PT   PROX_OPS     195.8   50.000    -9.20 -124.85   -1.18    0.002   0.007   0.001   0.300   57.81
+     590  FINE_PT   PROX_OPS     195.6   50.000    -9.36 -124.77   -1.17    0.002   0.007   0.001   0.315   60.83
+     600  FINE_PT   PROX_OPS     195.3   50.000    -9.52 -124.68   -1.16    0.002   0.007   0.001   0.330   64.13
+     610  FINE_PT   PROX_OPS     195.1   50.000    -9.67 -124.59   -1.16    0.002   0.007   0.001   0.346   67.46
+     620  FINE_PT   PROX_OPS     194.9   50.000    -9.83 -124.51   -1.15    0.002   0.007   0.001   0.363   70.97
+     630  FINE_PT   PROX_OPS     194.6   50.000    -9.98 -124.42   -1.14    0.002   0.007   0.001   0.380   74.76
+     640  FINE_PT   PROX_OPS     194.4   50.000   -10.14 -124.33   -1.14    0.002   0.007   0.001   0.397   78.61
+     650  FINE_PT   PROX_OPS     194.2   50.000   -10.29 -124.25   -1.13    0.002   0.007   0.001   0.415   82.70
+     660  FINE_PT   PROX_OPS     194.0   50.000   -10.44 -124.16   -1.12    0.002   0.007   0.001   0.433   86.88
+     670  FINE_PT   PROX_OPS     193.7   50.000   -10.60 -124.07   -1.12    0.002   0.007   0.001   0.452   91.36
+     680  FINE_PT   PROX_OPS     193.5   50.000   -10.75 -123.98   -1.11    0.002   0.007   0.001   0.470   95.95
+     690  FINE_PT   PROX_OPS     193.3   50.000   -10.91 -123.89   -1.10    0.002   0.007   0.001   0.489  100.76
+  Wall time: 18376ms for 70000 ticks (0.263ms/tick)
+
+  FINE_POINTING seen:   True
+  MOMENTUM_DUMP seen:   False
+  DUMP -> FINE_PT return:False
+    PASS PASS -- FINE_POINTING mode reached
+    PASS PASS -- MOMENTUM_DUMP not expected within 700s at low ADCS gains
+    PASS PASS -- no SAFE_MODE entries after FINE_POINTING (got 0)
+
+==========================================================
+  FAIL  2 FAILURES  (7/9 passed)
+  Review logs above to identify the failing transition.
+==========================================================
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW ModeManager initialised — starting in DETUMBLE
+  flight_loop v2: full ADCS stack enabled
+  FSW [  189.9s] DETUMBLE             -> SUN_ACQUISITION
+  FSW [  360.2s] SUN_ACQUISITION      -> FINE_POINTING
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW ModeManager initialised — starting in DETUMBLE
+  flight_loop v2: full ADCS stack enabled
+  FSW [    0.0s] DETUMBLE             -> SUN_ACQUISITION
+  FSW [    0.0s] SUN_ACQUISITION      -> FINE_POINTING
+  FSW ModeManager initialised — starting in DETUMBLE
+  FSW ModeManager initialised — starting in DETUMBLE
+  flight_loop v2: full ADCS stack enabled
+  FSW [    0.0s] DETUMBLE             -> SUN_ACQUISITION
+  FSW [    0.0s] SUN_ACQUISITION      -> FINE_POINTING
+CLOSED LOOP SIL FAILED 

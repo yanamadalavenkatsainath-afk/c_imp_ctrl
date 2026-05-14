@@ -10,6 +10,13 @@
         "**/node_modules",
         "**/__pycache__"
     ],
-    "reportMissingImports": "warning",
-    "reportMissingModuleSource": "none"
+    "reportMissingImports": "none",
+    "reportMissingModuleSource": "none",
+    "reportUnknownMemberType": "none",
+    "reportUnknownVariableType": "none",
+    "reportUnknownArgumentType": "none",
+    "useLibraryCodeForTypes": true,
+    "ignore": [
+        "C:/Users/Venkat/OneDrive/Desktop/appex/flight sim"
+    ]
 }

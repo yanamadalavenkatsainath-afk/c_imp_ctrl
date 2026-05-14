@@ -95,8 +95,8 @@ static void _cw_control_input(const THEKF_State *ekf,
     double c  = cos(nt);
     double ax = accel[0], ay = accel[1], az = accel[2];
 
-    Bu[0] = (ax*(4*s - 3*nt) + 2*ay*(1 - c)) / n2;
-    Bu[1] = (-2*ax*(1 - c) + ay*(4*s/n - 3*dt_m)) / n;
+    Bu[0] = (ax*(1 - c) + 2*ay*(nt - s)) / n2;
+    Bu[1] = (2*ax*(s - nt)) / n2 + ay*(4*(1 - c)/n2 - 1.5*dt_m*dt_m);
     Bu[2] = az*(1 - c) / n2;
     Bu[3] = (ax*s + 2*ay*(1-c)) / n;
     Bu[4] = (-2*ax*(1-c) + ay*(4*s - 3*nt)) / n;

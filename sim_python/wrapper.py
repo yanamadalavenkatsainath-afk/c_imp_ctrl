@@ -1,12 +1,13 @@
+# -*- coding: utf-8 -*-
 """
-wrapper.py — ctypes bridge: Python <-> C GNC library
+wrapper.py -- ctypes bridge: Python <-> C GNC library
 =====================================================
 Drop-in replacement for estimation.th_ekf.THEKF.
 
 New bindings vs old wrapper:
-  + THEKF_update_position()         — linear camera position update
-  + THEKF_update_velocity_doppler() — scalar Doppler radial-velocity update
-  + THEKF_inflate_process_noise()   — P inflation for TERMINAL phase
+  + THEKF_update_position()         -- linear camera position update
+  + THEKF_update_velocity_doppler() -- scalar Doppler radial-velocity update
+  + THEKF_inflate_process_noise()   -- P inflation for TERMINAL phase
   + RPOD_prox_ops() / RPOD_terminal() / RPOD_lost_target() / RPOD_formation_hold()
     all use updated struct layouts matching rpod_ctrl.h
 
@@ -22,12 +23,13 @@ import ctypes
 import numpy as np
 import os
 import sys
+from typing import Optional
 
 FLIGHT_SIM_PATH = r"C:\Users\Venkat\OneDrive\Desktop\appex\flight sim"
 
-# ── Pylance / pyright: suppress unresolvable runtime path imports ──
+# -- Pylance / pyright: suppress unresolvable runtime path imports --
 # These modules live in FLIGHT_SIM_PATH which is only on sys.path at
-# runtime (injected above). Pylance can't see them statically — that
+# runtime (injected above). Pylance can't see them statically -- that
 # is expected and not a bug. The # type: ignore comments on the
 # import lines suppress the false-positive red squiggles.
 # To make Pylance fully happy, add a pyrightconfig.json (generated
@@ -43,10 +45,10 @@ def _find_lib():
         if os.path.exists(p):
             return p
     raise FileNotFoundError(
-        f"gnc_lib not found in {_ROOT!r} — run build.bat first")
+        f"gnc_lib not found in {_ROOT!r} -- run build.bat first")
 
 
-# ── C struct layout — must exactly mirror THEKF_State in th_ekf.h ──
+# -- C struct layout -- must exactly mirror THEKF_State in th_ekf.h --
 class _THEKF_State_C(ctypes.Structure):
     _fields_ = [
         ("a",     ctypes.c_double),
@@ -65,7 +67,7 @@ class _THEKF_State_C(ctypes.Structure):
     ]
 
 
-# ── RPOD structs — mirror rpod_ctrl.h exactly ──────────────────
+# -- RPOD structs -- mirror rpod_ctrl.h exactly ------------------
 class _RPOD_State_C(ctypes.Structure):
     _fields_ = [
         ("pos", ctypes.c_double * 3),
@@ -91,11 +93,11 @@ class _RPOD_FormHoldState_C(ctypes.Structure):
     ]
 
 
-# ── Load library ──────────────────────────────────────────────────
+# -- Load library --------------------------------------------------
 try:
     _lib = ctypes.CDLL(_find_lib())
 
-    # ── THEKF_init ────────────────────────────────────────────────
+    # -- THEKF_init ------------------------------------------------
     _lib.THEKF_init.argtypes = [
         ctypes.POINTER(_THEKF_State_C),
         ctypes.c_double, ctypes.c_double, ctypes.c_double,
@@ -103,7 +105,7 @@ try:
     ]
     _lib.THEKF_init.restype = None
 
-    # ── THEKF_seed ────────────────────────────────────────────────
+    # -- THEKF_seed ------------------------------------------------
     _lib.THEKF_seed.argtypes = [
         ctypes.POINTER(_THEKF_State_C),
         ctypes.POINTER(ctypes.c_double),  # x0[6]
@@ -112,14 +114,14 @@ try:
     ]
     _lib.THEKF_seed.restype = None
 
-    # ── THEKF_predict ─────────────────────────────────────────────
+    # -- THEKF_predict ---------------------------------------------
     _lib.THEKF_predict.argtypes = [
         ctypes.POINTER(_THEKF_State_C),
         ctypes.POINTER(ctypes.c_double),  # accel_lvlh[3] or NULL
     ]
     _lib.THEKF_predict.restype = None
 
-    # ── THEKF_update (ranging) ────────────────────────────────────
+    # -- THEKF_update (ranging) ------------------------------------
     _lib.THEKF_update.argtypes = [
         ctypes.POINTER(_THEKF_State_C),
         ctypes.POINTER(ctypes.c_double),  # z_meas[3]
@@ -128,7 +130,7 @@ try:
     ]
     _lib.THEKF_update.restype = ctypes.c_int
 
-    # ── THEKF_update_position (camera) ───────────────────────────
+    # -- THEKF_update_position (camera) ---------------------------
     _lib.THEKF_update_position.argtypes = [
         ctypes.POINTER(_THEKF_State_C),
         ctypes.POINTER(ctypes.c_double),  # z_pos[3]
@@ -137,7 +139,7 @@ try:
     ]
     _lib.THEKF_update_position.restype = ctypes.c_int
 
-    # ── THEKF_update_velocity_doppler ─────────────────────────────
+    # -- THEKF_update_velocity_doppler -----------------------------
     _lib.THEKF_update_velocity_doppler.argtypes = [
         ctypes.POINTER(_THEKF_State_C),
         ctypes.c_double,                  # v_radial_meas
@@ -146,17 +148,18 @@ try:
     ]
     _lib.THEKF_update_velocity_doppler.restype = ctypes.c_int
 
-    # ── THEKF_inflate_process_noise ───────────────────────────────
+    # -- THEKF_inflate_process_noise -------------------------------
     _lib.THEKF_inflate_process_noise.argtypes = [
         ctypes.POINTER(_THEKF_State_C),
         ctypes.c_double,                  # scale
     ]
     _lib.THEKF_inflate_process_noise.restype = None
 
-    # ── RPOD functions ────────────────────────────────────────────
+    # -- RPOD functions --------------------------------------------
     _lib.RPOD_prox_ops.argtypes = [
         ctypes.POINTER(_RPOD_State_C),
         ctypes.c_double,                  # truth_range
+        ctypes.c_double,                  # n_chief (rad/s)
         ctypes.c_double,                  # accel_max
         ctypes.POINTER(ctypes.c_double),  # accel_out[3]
     ]
@@ -184,7 +187,7 @@ try:
     _lib.RPOD_formation_hold.restype = None
 
     _C_AVAILABLE = True
-    print("[wrapper] C library loaded OK →", _find_lib())
+    print("[wrapper] C library loaded OK ->", _find_lib())
 
 except (FileNotFoundError, OSError) as _e:
     print(f"[wrapper] WARNING: {_e}")
@@ -192,7 +195,7 @@ except (FileNotFoundError, OSError) as _e:
     _C_AVAILABLE = False
 
 
-# ── Python class — drop-in for THEKF ─────────────────────────────
+# -- Python class -- drop-in for THEKF -----------------------------
 class THEKF_C:
     """
     Drop-in replacement for estimation.th_ekf.THEKF.
@@ -201,12 +204,12 @@ class THEKF_C:
     API matches THEKF exactly:
         initialise(x0, P0=None, nu0=0.0)
         predict(accel_lvlh=None)
-        update(z, R_meas, gate_k=5.0)               → bool
-        update_position(z_pos, R_pos, gate_k=5.0)   → bool   ← NEW
+        update(z, R_meas, gate_k=5.0)               -> bool
+        update_position(z_pos, R_pos, gate_k=5.0)   -> bool   <- NEW
         update_velocity_doppler(v_radial, r_hat,
-                                sigma_radial=0.005)  → bool   ← NEW
-        inflate_process_noise(scale=10.0)                     ← NEW
-        reinit_from_measurements(...)                → bool
+                                sigma_radial=0.005)  -> bool   <- NEW
+        inflate_process_noise(scale=10.0)                     <- NEW
+        reinit_from_measurements(...)                -> bool
         .x, .P, .nu, .position, .velocity, .position_std, .velocity_std
     """
 
@@ -233,7 +236,7 @@ class THEKF_C:
                         float(mu), float(dt),
                         float(q_pos), float(q_vel))
 
-    # ── State accessors ───────────────────────────────────────────
+    # -- State accessors -------------------------------------------
 
     @property
     def x(self):
@@ -282,11 +285,15 @@ class THEKF_C:
     def velocity_std(self):
         return np.sqrt(np.maximum(np.diag(self.P)[3:6], 0.0))
 
-    # ── Core EKF methods ─────────────────────────────────────────
+    # -- Core EKF methods -----------------------------------------
 
-    def initialise(self, x0, P0=None, nu0=0.0):
+    def initialise(self,
+                   x0,
+                   P0: Optional[np.ndarray] = None,
+                   nu0: float = 0.0) -> None:
         if not self._use_c:
-            self._py.initialise(x0, P0, nu0); return
+            self._py.initialise(x0, P0, nu0)  # type: ignore[arg-type]
+            return
         x0_c = (ctypes.c_double * 6)(*np.asarray(x0).tolist())
         if P0 is not None:
             P0_c = (ctypes.c_double * 36)(*np.asarray(P0).flatten().tolist())
@@ -294,9 +301,11 @@ class THEKF_C:
         else:
             _lib.THEKF_seed(ctypes.byref(self._s), x0_c, None, float(nu0))
 
-    def predict(self, accel_lvlh=None):
+    def predict(self, accel_lvlh: Optional[np.ndarray] = None) -> None:
         if not self._use_c:
-            self._py.predict(accel_lvlh); return
+            # Pass None explicitly when no accel — matches Python THEKF signature
+            self._py.predict(accel_lvlh)  # type: ignore[arg-type]
+            return
         if accel_lvlh is not None and np.any(np.asarray(accel_lvlh) != 0):
             a_c = (ctypes.c_double * 3)(*np.asarray(accel_lvlh).tolist())
             _lib.THEKF_predict(ctypes.byref(self._s), a_c)
@@ -358,7 +367,7 @@ class THEKF_C:
         """
         if not self._use_c:
             self._py.inject_velocity(vel_true, sigma_ms); return
-        # Implemented in Python for the C wrapper — sets x[3:6] directly.
+        # Implemented in Python for the C wrapper -- sets x[3:6] directly.
         noise = np.random.normal(0, sigma_ms, 3)
         xn = self.x
         xn[3:6] = np.asarray(vel_true) + noise

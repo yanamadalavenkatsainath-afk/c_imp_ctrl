@@ -50,7 +50,7 @@ int RPOD_prox_ops(const RPOD_State *state,
     }
 
     /* ── Deadband — already within dock zone ─────────────────── */
-    if (truth_range < 0.05) {
+    if (truth_range < RPOD_DOCK_DONE_M) {
         accel_out[0] = accel_out[1] = accel_out[2] = 0.0;
         return -1;
     }
@@ -177,7 +177,8 @@ int RPOD_terminal(const RPOD_TermState *state,
     /*
      * K_SQRT_TERM = V_TERM_MAX_MS / sqrt(TERMINAL_M)
      * v_des_mag   = min(K_SQRT_TERM * sqrt(max(com_range, 0.001)), V_TERM_MAX_MS)
-     * Inside capture: v_des_mag = min(v_des_mag, V_CAPTURE_MS)
+     * Inside capture: v_des_mag = min(v_des_mag, V_CAPTURE_MS).
+     * Keep closing until RPOD_DOCK_DONE_M; do not park at capture entry.
      */
     double rng_eff  = com_range > 0.001 ? com_range : 0.001;
     double v_des_mag = RPOD_K_SQRT_TERM * sqrt(rng_eff);
@@ -187,10 +188,7 @@ int RPOD_terminal(const RPOD_TermState *state,
 
     /* ── Target direction ─────────────────────────────────────── */
     double vel_des[3];
-    if (port_range < RPOD_DOCK_RANGE_M) {
-        /* Inside capture sphere — command zero velocity */
-        vel_des[0] = vel_des[1] = vel_des[2] = 0.0;
-    } else if (port_range > 0.001) {
+    if (port_range > 0.001) {
         /* Drive toward port */
         double tgt_hat[3];
         vec3_scale(port_diff, 1.0 / port_range, tgt_hat);

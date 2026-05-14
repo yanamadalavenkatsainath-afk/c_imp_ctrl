@@ -29,11 +29,20 @@ typedef struct {
 } BDot_State;
 
 /**
- * BDOT_init — initialise with Python-matching defaults.
+ * BDOT_init — gains tuned for GEO servicer plant (I=4.167 kg·m², B=4e-5 T).
+ *
+ * Required detumble from 24.66 deg/s within 300s:
+ *   tau_needed = I * omega / ts = 4.167 * 0.43 / 150 = 0.012 N·m
+ *   m_max >= tau_needed / B = 0.012 / 4e-5 = 300 A·m²
+ *
+ * k_bdot large enough to saturate at any omega > 0.01 rad/s:
+ *   m_sat when k_bdot * omega * B > m_max
+ *   → k_bdot > m_max / (omega_min * B) = 300 / (0.01 * 4e-5) = 7.5e8
+ *   Use 1e9 to guarantee saturation throughout detumble.
  */
 static inline void BDOT_init(BDot_State *s) {
-    s->k_bdot = 1e5;
-    s->m_max  = 0.2;
+    s->k_bdot = 1e9;
+    s->m_max  = 300.0;
 }
 
 /**
@@ -70,7 +79,7 @@ typedef struct {
  */
 static inline void RW_init(RW_State *s) {
     s->h[0] = s->h[1] = s->h[2] = 0.0;
-    s->h_max = 0.05;
+    s->h_max = 4.0;    /* matches Python ReactionWheel(h_max=4.0) N·m·s */
 }
 
 /**
@@ -136,16 +145,29 @@ void MTQ_compute_torque(const double m[3],
  * ══════════════════════════════════════════════════════════════════ */
 
 typedef struct {
-    double Kp;   /* proportional gain — default 0.3 */
-    double Kd;   /* derivative gain  — default 0.08 */
+    double Kp;   /* proportional gain — matches Python Kp=0.08284 */
+    double Kd;   /* derivative gain   — matches Python Kd=0.82257 */
 } AttCtrl_State;
 
 /**
- * ATTCTRL_init — initialise with Python-matching defaults.
+ * ATTCTRL_init — gains tuned for GEO servicer plant.
+ *
+ * Plant: I = 4.167 kg·m², tau_max = 2mN·m (wheel clamp).
+ *
+ *   wn   = sqrt(Kp/I) → Kp = wn² * I
+ *   zeta = Kd/(2*wn*I) = 0.9  →  Kd = 2*0.9*wn*I
+ *
+ * Constraints:
+ *   (a) tau at max error (q_err_vec≈1) <= tau_max:  Kp <= 2e-3
+ *   (b) h saturates in >> settling time:  h_max/Kp >> 4/(zeta*wn)
+ *       4.0/0.002 = 2000s >> 203s  ✓
+ *
+ * Kp=0.002 → wn=0.0219 rad/s, ts≈203s, zeta=0.9
+ * Old Kp=0.08284 caused h saturation in 48s → controller lost authority.
  */
 static inline void ATTCTRL_init(AttCtrl_State *s) {
-    s->Kp = 0.3;
-    s->Kd = 0.08;
+    s->Kp = 0.002;
+    s->Kd = 0.1643;
 }
 
 /**

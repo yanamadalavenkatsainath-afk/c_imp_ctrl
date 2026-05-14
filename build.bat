@@ -1,7 +1,27 @@
 @echo off
+setlocal EnableExtensions
+if /I "%~1"=="--inner" goto :build_inner
+
+if not exist "build_results" mkdir "build_results"
+for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set BUILD_TS=%%I
+set "BUILD_DIR=build_results\run_%BUILD_TS%"
+mkdir "%BUILD_DIR%"
+set "BUILD_LOG=%BUILD_DIR%\build.log"
+
+echo === Saving build output to %BUILD_LOG% ===
+call "%~f0" --inner > "%BUILD_LOG%" 2>&1
+set "BUILD_RC=%errorlevel%"
+
+type "%BUILD_LOG%"
+> "build_results\latest_path.txt" echo %CD%\%BUILD_DIR%
+echo.
+echo === Build log saved: %BUILD_LOG% ===
+exit /b %BUILD_RC%
+
+:build_inner
 REM ================================================================
-REM build.bat — Compile GNC C library + run SIL verification
-REM v2: added quest.c, adcs.c, mode_manager.c
+REM build.bat -- Compile GNC C library + run SIL verification
+REM v4: added closed_loop_sil.py to Python test sequence
 REM ================================================================
 
 echo === Ensuring Python package structure in flight sim ===
@@ -25,7 +45,7 @@ python sim_python\gen_pyrightconfig.py
 if %errorlevel% neq 0 ( echo pyrightconfig generation FAILED & exit /b 1 )
 
 echo.
-echo === Compiling GNC library (full ADCS stack) ===
+echo === Compiling GNC library (full stack) ===
 gcc -fPIC -shared -O2 -DMEKF_NO_CMSIS ^
     -Isrc_c ^
     -o gnc_lib.dll ^
@@ -35,6 +55,8 @@ gcc -fPIC -shared -O2 -DMEKF_NO_CMSIS ^
     src_c/quest.c ^
     src_c/adcs.c ^
     src_c/mode_manager.c ^
+    src_c/lambert_solver.c ^
+    src_c/chief_pose_estimator.c ^
     src_c/flight_loop.c ^
     -lm
 if %errorlevel% neq 0 ( echo BUILD FAILED & exit /b 1 )
@@ -51,6 +73,8 @@ gcc -O2 -DMEKF_NO_CMSIS -DFLIGHT_LOOP_STANDALONE -Isrc_c ^
     src_c/quest.c ^
     src_c/adcs.c ^
     src_c/mode_manager.c ^
+    src_c/lambert_solver.c ^
+    src_c/chief_pose_estimator.c ^
     -lm
 if %errorlevel% neq 0 ( echo FLIGHT LOOP BUILD FAILED & exit /b 1 )
 
@@ -74,6 +98,12 @@ if %errorlevel% neq 0 ( echo ADCS TEST BUILD FAILED & exit /b 1 )
 gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_mode_manager.exe tests/test_mode_manager.c src_c/mode_manager.c -lm
 if %errorlevel% neq 0 ( echo MODE MANAGER TEST BUILD FAILED & exit /b 1 )
 
+gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_lambert.exe tests/test_lambert.c src_c/lambert_solver.c -lm
+if %errorlevel% neq 0 ( echo LAMBERT TEST BUILD FAILED & exit /b 1 )
+
+gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_chief_pose.exe tests/test_chief_pose.c src_c/chief_pose_estimator.c -lm
+if %errorlevel% neq 0 ( echo CHIEF POSE TEST BUILD FAILED & exit /b 1 )
+
 echo.
 echo === Running flight_loop smoke test ===
 flight_loop_test.exe
@@ -93,6 +123,10 @@ test_adcs.exe
 if %errorlevel% neq 0 ( echo ADCS TESTS FAILED & exit /b 1 )
 test_mode_manager.exe
 if %errorlevel% neq 0 ( echo MODE MANAGER TESTS FAILED & exit /b 1 )
+test_lambert.exe
+if %errorlevel% neq 0 ( echo LAMBERT TESTS FAILED & exit /b 1 )
+test_chief_pose.exe
+if %errorlevel% neq 0 ( echo CHIEF POSE TESTS FAILED & exit /b 1 )
 
 echo.
 echo === Running Python SIL comparison ===
@@ -103,6 +137,11 @@ echo.
 echo === Running Real-Time SIL verification ===
 python sim_python/verify_realtime_sil.py
 if %errorlevel% neq 0 ( echo REALTIME SIL FAILED & exit /b 1 )
+
+echo.
+echo === Running Closed-Loop SIL verification ===
+python sim_python/closed_loop_sil.py
+if %errorlevel% neq 0 ( echo CLOSED LOOP SIL FAILED & exit /b 1 )
 
 echo.
 echo === ALL PASS ===

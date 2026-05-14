@@ -38,6 +38,14 @@ typedef struct {
     uint8_t _pad[7];
 } CameraPacket;
 
+/* 10 Hz close-range docking port packet */
+typedef struct {
+    double  port_lvlh[3];   /* docking port position in LVLH [m] */
+    double  R_diag[3];      /* diagonal of R (noise variances)   */
+    uint8_t valid;
+    uint8_t _pad[7];
+} PortPacket;
+
 /* ── 10 Hz magnetometer packet ──────────────────────────────── */
 typedef struct {
     double  body[3];        /* measured unit vector in body frame */
@@ -59,6 +67,7 @@ typedef struct {
     GyroPacket   gyro;
     RangePacket  range;
     CameraPacket camera;
+    PortPacket   port;
     MagPacket    mag;
     SunPacket    sun;
     uint64_t     sim_tick;       /* simulation tick counter       */
