@@ -102,17 +102,17 @@ static void test_prox_speed_profile(void) {
     }
 
 
-/* ── Test 3: PROX_OPS → TERMINAL handoff at 0.8m ───────────────
+/* ── Test 3: PROX_OPS → TERMINAL handoff at 5m ───────────────
    When truth_range < RPOD_TERMINAL_M the function must call
    through to RPOD_terminal and return what it returns.           */
 static void test_prox_terminal_handoff(void) {
-    printf("\nTest 3: PROX_OPS → TERMINAL handoff at range < 0.8m\n");
+    printf("\nTest 3: PROX_OPS → TERMINAL handoff at range < 5m\n");
 
     double n_chief   = 7.292e-5;
     double accel_max = 0.020;
 
     RPOD_State state;
-    state.pos[0] = 0.5;   /* 0.5m — inside TERMINAL_M = 0.8m */
+    state.pos[0] = 0.5;   /* 0.5m — inside TERMINAL_M = 5m */
     state.pos[1] = 0.0;
     state.pos[2] = 0.0;
     state.vel[0] = -0.003;   /* 3mm/s closing */
@@ -131,7 +131,7 @@ static void test_prox_terminal_handoff(void) {
     double diff = fabs(accel_prox[0] - accel_term[0])
                 + fabs(accel_prox[1] - accel_term[1])
                 + fabs(accel_prox[2] - accel_term[2]);
-    CHECK(diff < 1e-9, "PROX_OPS delegates to TERMINAL for range < 0.8m");
+    CHECK(diff < 1e-9, "PROX_OPS delegates to TERMINAL for range < 5m");
     printf("  prox=[%.5f,%.5f,%.5f]  term=[%.5f,%.5f,%.5f]\n",
            accel_prox[0], accel_prox[1], accel_prox[2],
            accel_term[0], accel_term[1], accel_term[2]);
@@ -293,7 +293,7 @@ static void test_prox_deadband(void) {
     state.vel[1] = 0.0;
     state.vel[2] = 0.0;
 
-    /* truth_range = 0.03 < TERMINAL_M = 0.8, so PROX falls through
+    /* truth_range = 0.03 < TERMINAL_M = 5.0, so PROX falls through
        to TERMINAL, which returns 1 and zeros accel */
     double accel[3];
     RPOD_prox_ops(&state, 0.03, n_chief, accel_max, accel);
@@ -303,7 +303,7 @@ static void test_prox_deadband(void) {
 
 
 /* ── Test 7: TERMINAL VMAX cap ──────────────────────────────────
-   At 2m from chief, k*range = 0.010*2 = 0.020 > VMAX=0.005.
+   At 8m from chief, sqrt-law speed exceeds the terminal speed cap.
    Desired speed must be capped at RPOD_TERMINAL_VMAX.           */
 static void test_terminal_vmax(void) {
     printf("\nTest 7: TERMINAL speed capped at VMAX=25mm/s\n");
@@ -312,7 +312,7 @@ static void test_terminal_vmax(void) {
 
     RPOD_State state;
     state.pos[0] = 0.0;
-    state.pos[1] = -2.0;   /* 2m along-track */
+    state.pos[1] = -8.0;   /* 8m along-track */
     state.pos[2] = 0.0;
     state.vel[0] = 0.0;
     state.vel[1] = RPOD_TERMINAL_VMAX;   /* already at VMAX — accel ≈ 0 */
@@ -321,9 +321,9 @@ static void test_terminal_vmax(void) {
     double accel[3];
     RPOD_terminal_simple(&state, accel_max, accel);
 
-    double vel_des_mag = RPOD_TERMINAL_K * 2.0;   /* would be 0.020 */
+    double vel_des_mag = RPOD_K_SQRT_TERM * sqrt(8.0);
     CHECK(vel_des_mag > RPOD_TERMINAL_VMAX,
-          "k*range > VMAX — cap is needed at 2m");
+          "sqrt-law speed > VMAX: cap is needed at 8m");
     /* vel_des = [0, +VMAX, 0], vel = [0, +VMAX, 0] → accel ≈ 0 */
     CHECK(norm3(accel) < 1e-8,
           "accel ≈ 0 when already at VMAX closing speed");

@@ -52,6 +52,8 @@ gcc -fPIC -shared -O2 -DMEKF_NO_CMSIS ^
     src_c/th_ekf.c ^
     src_c/mekf.c ^
     src_c/rpod_ctrl.c ^
+    src_c/terminal_filter.c ^
+    src_c/port_tracker.c ^
     src_c/quest.c ^
     src_c/adcs.c ^
     src_c/mode_manager.c ^
@@ -70,6 +72,8 @@ gcc -O2 -DMEKF_NO_CMSIS -DFLIGHT_LOOP_STANDALONE -Isrc_c ^
     src_c/th_ekf.c ^
     src_c/mekf.c ^
     src_c/rpod_ctrl.c ^
+    src_c/terminal_filter.c ^
+    src_c/port_tracker.c ^
     src_c/quest.c ^
     src_c/adcs.c ^
     src_c/mode_manager.c ^
@@ -145,3 +149,5 @@ if %errorlevel% neq 0 ( echo CLOSED LOOP SIL FAILED & exit /b 1 )
 
 echo.
 echo === ALL PASS ===
+
+

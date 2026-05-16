@@ -191,6 +191,8 @@ int RPOD_terminal(const RPOD_TermState *state,
     double rng_eff  = com_range > 0.001 ? com_range : 0.001;
     double v_des_mag = RPOD_K_SQRT_TERM * sqrt(rng_eff);
     if (v_des_mag > RPOD_V_TERM_MAX_MS) v_des_mag = RPOD_V_TERM_MAX_MS;
+    if (tgt_range < RPOD_APPROACH_M && v_des_mag > RPOD_V_APPROACH_MS)
+        v_des_mag = RPOD_V_APPROACH_MS;
     if (tgt_range < RPOD_DOCK_RANGE_M && v_des_mag > RPOD_V_CAPTURE_MS)
         v_des_mag = RPOD_V_CAPTURE_MS;
 
@@ -313,3 +315,4 @@ int RPOD_terminal_simple(const RPOD_State *state,
 
     return RPOD_terminal(&ts, accel_max, accel_out, &_is_braking);
 }
+

@@ -42,7 +42,7 @@
  *   V_CLOSE_NEAR_MS =   5mm/s  (< 10m)
  */
 #define RPOD_FAR_FIELD_M        500.0   /* Lambert → PROX_OPS handoff [m]  */
-#define RPOD_TERMINAL_M           0.8   /* PROX_OPS → TERMINAL handoff [m] */
+#define RPOD_TERMINAL_M           5.0   /* PROX_OPS -> TERMINAL handoff [m] */
 #define RPOD_PROX_TAU             5.0   /* velocity-error time constant [s] */
 
 #define RPOD_V_CLOSE_MAX_MS    0.200    /* max closing speed [m/s]          */
@@ -53,11 +53,13 @@
 
 /* ── TERMINAL constants ──────────────────────────────────────── */
 #define RPOD_V_TERM_MAX_MS     0.025    /* max speed in TERMINAL [m/s]      */
-#define RPOD_V_CAPTURE_MS      0.0015   /* speed inside capture zone [m/s]  */
+#define RPOD_V_APPROACH_MS     0.010    /* speed below approach band [m/s]  */
+#define RPOD_V_CAPTURE_MS      0.005    /* speed inside capture zone [m/s]  */
 #define RPOD_DOCK_RANGE_M      0.30     /* capture sphere radius [m]        */
 #define RPOD_DOCK_DONE_M       0.20     /* docking complete [m]             */
-#define RPOD_DOCK_MAX_SPEED_MS 0.010    /* max port-relative dock speed     */
+#define RPOD_DOCK_MAX_SPEED_MS 0.050    /* max port-relative dock speed     */
 #define RPOD_PORT_SANITY_M     2.0      /* EKF spike guard: max port dist   */
+#define RPOD_APPROACH_M        0.80     /* terminal approach speed band [m] */
 #define RPOD_BRAKE_DONE_MS     0.010    /* entry brake target speed [m/s]   */
 #define RPOD_BRAKE_ENTRY_MS    0.015    /* brake if entry speed > this [m/s]*/
 
@@ -67,7 +69,7 @@
 #define RPOD_TAU_FAR           3.0      /* TAU [s] for com_range >= 0.60m  */
 
 /* Terminal sqrt-law gain: V_TERM_MAX_MS / sqrt(TERMINAL_M) */
-#define RPOD_K_SQRT_TERM       0.027951 /* = 0.025 / sqrt(0.8) */
+#define RPOD_K_SQRT_TERM       0.01118034 /* = 0.025 / sqrt(5.0) */
 
 /* ── TERMINAL sqrt-law gain (for test_rpod.c compatibility) ─── */
 /* K_SQRT_TERM defined above as RPOD_K_SQRT_TERM.
@@ -200,3 +202,4 @@ void RPOD_formation_hold(const RPOD_FormHoldState *state,
                          double accel_out[3]);
 
 #endif /* RPOD_CTRL_H */
+

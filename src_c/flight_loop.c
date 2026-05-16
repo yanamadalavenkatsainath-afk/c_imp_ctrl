@@ -1,5 +1,5 @@
 /**
- * flight_loop.c — PC SIL Real-Time Flight Loop v2
+ * flight_loop.c ??? PC SIL Real-Time Flight Loop v2
  * Full ADCS stack: ModeManager + QUEST + B-dot + RW + MTQ + PD
  */
 #include "flight_loop.h"
@@ -9,6 +9,8 @@
 #include "adcs.h"
 #include "mode_manager.h"
 #include "rpod_ctrl.h"
+#include "terminal_filter.h"
+#include "port_tracker.h"
 #include "sensor_packet.h"
 #include "command_packet.h"
 #include <math.h>
@@ -52,11 +54,11 @@ static double _pointing_err_deg(const double q[4]){
 }
 
 /*
- * g_accel_lvlh_hold — RPOD accel hold register.
+ * g_accel_lvlh_hold ??? RPOD accel hold register.
  *
  * closed_loop_sil.py reads cf->cmd.accel_lvlh every 100 Hz tick and feeds
  * it to the CW plant.  RPOD guidance runs at 10 Hz (g_tick%10==0) and the
- * remaining 9 ticks zeroed accel — giving only 10% of commanded thrust.
+ * remaining 9 ticks zeroed accel ??? giving only 10% of commanded thrust.
  * Fix: cache the last computed accel and write it into every CommandFrame.
  * Hold is cleared when RPOD is not active.
  */
@@ -66,6 +68,17 @@ static double g_torque_rw_hold[3]  = {0.0, 0.0, 0.0};
 static int    g_rpod_mode_hold     = -1;
 static int    g_docked_latched     = 0;
 static int    g_terminal_inflated  = 0;
+static TermNavFilter g_terminal_nav;
+static PortTracker   g_port_tracker;
+static double                  g_terminal_cam_lost_s = -1.0;
+static int                     g_lost_target_active = 0;
+
+static void _reset_terminal_guidance(void){
+    TNF_reset(&g_terminal_nav);
+    PT_reset(&g_port_tracker);
+    g_terminal_cam_lost_s = -1.0;
+    g_lost_target_active = 0;
+}
 
 static void _clear_attitude_holds(void){
     g_dipole_mtq_hold[0]=g_dipole_mtq_hold[1]=g_dipole_mtq_hold[2]=0.0;
@@ -73,8 +86,8 @@ static void _clear_attitude_holds(void){
 }
 
 /*
- * _apply_rw_clamped — clamp torque to plant physical limit before h_rw
- * integration.  The PhysicsPlantSim clamps applied torque to tau_max=2mN·m.
+ * _apply_rw_clamped ??? clamp torque to plant physical limit before h_rw
+ * integration.  The PhysicsPlantSim clamps applied torque to tau_max=2mN??m.
  * Without this, the C wheel counter diverges from plant reality, triggering
  * spurious momentum dumps before attitude has converged.
  */
@@ -100,7 +113,7 @@ void flight_loop_init(double a_chief_m,double e_chief,double mu,double dt_thekf_
     RW_init(&g_rw);
     MTQ_init(&g_mtq);
     ATTCTRL_init(&g_attctrl);
-    g_tick=0; g_max_loop_ms=0.0; g_missed=0; g_is_braking=-1; g_rpod_mode_hold=-1; g_docked_latched=0; g_terminal_inflated=0;
+    g_tick=0; g_max_loop_ms=0.0; g_missed=0; g_is_braking=-1; g_rpod_mode_hold=-1; g_docked_latched=0; g_terminal_inflated=0; _reset_terminal_guidance();
     g_cmd_frame.timing.deadline_ms=g_deadline_ms;
     printf("  flight_loop v2: full ADCS stack enabled\n");
 }
@@ -120,7 +133,7 @@ CommandFrame *flight_loop_step(void){
     CommandFrame *cf=&g_cmd_frame;
     double t_sim=(double)g_tick*0.01;
 
-    /* ── 100 Hz: Gyro + MEKF predict ──────────────────────────── */
+    /* ?????? 100 Hz: Gyro + MEKF predict ???????????????????????????????????????????????????????????????????????????????????? */
     if(sf->gyro.valid){
         MEKF_FLOAT w[3]={(MEKF_FLOAT)sf->gyro.omega_xyz[0],
                          (MEKF_FLOAT)sf->gyro.omega_xyz[1],
@@ -140,15 +153,15 @@ CommandFrame *flight_loop_step(void){
         sf->gyro.valid?sf->gyro.omega_xyz[2]-(double)g_mekf.bias[2]:0.0
     };
 
-    /* ── Mode manager update ───────────────────────────────────── */
+    /* ?????? Mode manager update ??????????????????????????????????????????????????????????????????????????????????????????????????????????????? */
     double quest_err=-1.0;
     FSW_Mode mode=MM_update(&g_mm,t_sim,omega_est,g_rw.h,
                             quest_err,0,cf->att.pointing_err_deg);
 
-    /* ── Zero actuator outputs ─────────────────────────────────── */
+    /* ?????? Zero actuator outputs ????????????????????????????????????????????????????????????????????????????????????????????????????????? */
     memset(cf->cmd.torque_rw, 0,sizeof(cf->cmd.torque_rw));
     memset(cf->cmd.dipole_mtq,0,sizeof(cf->cmd.dipole_mtq));
-    /* Restore held accel — plant reads this every 100 Hz tick */
+    /* Restore held accel ??? plant reads this every 100 Hz tick */
     cf->cmd.accel_lvlh[0]=g_accel_lvlh_hold[0];
     cf->cmd.accel_lvlh[1]=g_accel_lvlh_hold[1];
     cf->cmd.accel_lvlh[2]=g_accel_lvlh_hold[2];
@@ -160,12 +173,13 @@ CommandFrame *flight_loop_step(void){
     cf->cmd.torque_rw[2]=g_torque_rw_hold[2];
     cf->cmd.rpod_mode=g_rpod_mode_hold;
 
-    /* ── Mode dispatch ─────────────────────────────────────────── */
+    /* ?????? Mode dispatch ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????? */
     if(mode==MODE_SAFE_MODE){
         g_accel_lvlh_hold[0]=g_accel_lvlh_hold[1]=g_accel_lvlh_hold[2]=0.0;
         g_rpod_mode_hold=-1;
         g_is_braking=-1;
         g_terminal_inflated=0;
+        _reset_terminal_guidance();
         _clear_attitude_holds();
         cf->cmd.rpod_mode=-1;
         cf->cmd.accel_lvlh[0]=cf->cmd.accel_lvlh[1]=cf->cmd.accel_lvlh[2]=0.0;
@@ -178,6 +192,7 @@ CommandFrame *flight_loop_step(void){
         g_rpod_mode_hold=-1;
         g_is_braking=-1;
         g_terminal_inflated=0;
+        _reset_terminal_guidance();
         g_torque_rw_hold[0]=g_torque_rw_hold[1]=g_torque_rw_hold[2]=0.0;
         cf->cmd.rpod_mode=-1;
         cf->cmd.accel_lvlh[0]=cf->cmd.accel_lvlh[1]=cf->cmd.accel_lvlh[2]=0.0;
@@ -195,6 +210,7 @@ CommandFrame *flight_loop_step(void){
         g_rpod_mode_hold=-1;
         g_is_braking=-1;
         g_terminal_inflated=0;
+        _reset_terminal_guidance();
         g_dipole_mtq_hold[0]=g_dipole_mtq_hold[1]=g_dipole_mtq_hold[2]=0.0;
         cf->cmd.rpod_mode=-1;
         cf->cmd.accel_lvlh[0]=cf->cmd.accel_lvlh[1]=cf->cmd.accel_lvlh[2]=0.0;
@@ -234,6 +250,7 @@ CommandFrame *flight_loop_step(void){
         g_rpod_mode_hold=-1;
         g_is_braking=-1;
         g_terminal_inflated=0;
+        _reset_terminal_guidance();
         cf->cmd.rpod_mode=-1;
         cf->cmd.accel_lvlh[0]=cf->cmd.accel_lvlh[1]=cf->cmd.accel_lvlh[2]=0.0;
         if(sf->mag.valid){
@@ -251,7 +268,7 @@ CommandFrame *flight_loop_step(void){
         cf->cmd.fsw_mode=4;
     }
 
-    /* ── 10 Hz tasks ──────────────────────────────────────────── */
+    /* ?????? 10 Hz tasks ???????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????? */
     cf->ekf_updated=0;
     if(g_tick%10==0){
         THEKF_predict(&g_thekf,g_accel_lvlh_hold);
@@ -298,42 +315,74 @@ CommandFrame *flight_loop_step(void){
                 g_rpod_mode_hold=10;
                 g_is_braking=-1;
                 g_terminal_inflated=0;
+                _reset_terminal_guidance();
             }else if(tr>RPOD_DOCK_DONE_M){
                 if(!g_terminal_inflated){
                     THEKF_inflate_process_noise(&g_thekf,10.0);
                     g_terminal_inflated=1;
                 }
                 RPOD_TermState ts;
-                ts.pos[0]=g_rpod_state.pos[0]; ts.pos[1]=g_rpod_state.pos[1]; ts.pos[2]=g_rpod_state.pos[2];
-                ts.vel[0]=g_rpod_state.vel[0]; ts.vel[1]=g_rpod_state.vel[1]; ts.vel[2]=g_rpod_state.vel[2];
-                ts.has_port=sf->port.valid?1:0;
+                double guided_pos[3], guided_vel[3], tracked_port[3];
+                TNF_update(&g_terminal_nav, g_rpod_state.pos, g_rpod_state.vel,
+                                 sf->camera.valid ? 1 : 0, 0.1,
+                                 guided_pos, guided_vel);
+                ts.pos[0]=guided_pos[0]; ts.pos[1]=guided_pos[1]; ts.pos[2]=guided_pos[2];
+                ts.vel[0]=guided_vel[0]; ts.vel[1]=guided_vel[1]; ts.vel[2]=guided_vel[2];
+                ts.has_port=PT_update(&g_port_tracker, sf->port.port_lvlh,
+                                                  sf->port.valid ? 1 : 0,
+                                                  0.1, tracked_port);
                 if(ts.has_port){
-                    ts.port_lvlh[0]=sf->port.port_lvlh[0];
-                    ts.port_lvlh[1]=sf->port.port_lvlh[1];
-                    ts.port_lvlh[2]=sf->port.port_lvlh[2];
-                    ts.port_axis_lvlh[0]=sf->port.port_axis_lvlh[0];
-                    ts.port_axis_lvlh[1]=sf->port.port_axis_lvlh[1];
-                    ts.port_axis_lvlh[2]=sf->port.port_axis_lvlh[2];
-                    ts.port_vel_lvlh[0]=sf->port.port_vel_lvlh[0];
-                    ts.port_vel_lvlh[1]=sf->port.port_vel_lvlh[1];
-                    ts.port_vel_lvlh[2]=sf->port.port_vel_lvlh[2];
+                    ts.port_lvlh[0]=tracked_port[0];
+                    ts.port_lvlh[1]=tracked_port[1];
+                    ts.port_lvlh[2]=tracked_port[2];
+                    if(sf->port.valid){
+                        ts.port_axis_lvlh[0]=sf->port.port_axis_lvlh[0];
+                        ts.port_axis_lvlh[1]=sf->port.port_axis_lvlh[1];
+                        ts.port_axis_lvlh[2]=sf->port.port_axis_lvlh[2];
+                        ts.port_vel_lvlh[0]=sf->port.port_vel_lvlh[0];
+                        ts.port_vel_lvlh[1]=sf->port.port_vel_lvlh[1];
+                        ts.port_vel_lvlh[2]=sf->port.port_vel_lvlh[2];
+                    }else{
+                        ts.port_axis_lvlh[0]=0.0; ts.port_axis_lvlh[1]=0.0; ts.port_axis_lvlh[2]=1.0;
+                        ts.port_vel_lvlh[0]=0.0; ts.port_vel_lvlh[1]=0.0; ts.port_vel_lvlh[2]=0.0;
+                    }
                 }else{
                     ts.port_lvlh[0]=0.0; ts.port_lvlh[1]=0.0; ts.port_lvlh[2]=0.0;
                     ts.port_axis_lvlh[0]=0.0; ts.port_axis_lvlh[1]=0.0; ts.port_axis_lvlh[2]=1.0;
                     ts.port_vel_lvlh[0]=0.0; ts.port_vel_lvlh[1]=0.0; ts.port_vel_lvlh[2]=0.0;
                 }
-                int ret=RPOD_terminal(&ts,ar,new_acc,&g_is_braking);
-                g_rpod_mode_hold=(ret==2)?12:11;
-                if(ret==2){
-                    g_docked_latched=1;
-                    g_is_braking=-1;
-                    new_acc[0]=0.0; new_acc[1]=0.0; new_acc[2]=0.0;
+
+                if(!sf->camera.valid){
+                    if(g_terminal_cam_lost_s < 0.0) g_terminal_cam_lost_s = t_sim;
+                    if((t_sim - g_terminal_cam_lost_s) >= 2.0) g_lost_target_active = 1;
+                }else{
+                    g_terminal_cam_lost_s = -1.0;
+                    if(g_lost_target_active){
+                        g_lost_target_active = 0;
+                        g_is_braking = -1;
+                        TNF_reset(&g_terminal_nav);
+                    }
+                }
+
+                if(g_lost_target_active){
+                    RPOD_lost_target(&g_rpod_state, ar, new_acc);
+                    g_rpod_mode_hold=13;
+                }else{
+                    int ret=RPOD_terminal(&ts,ar,new_acc,&g_is_braking);
+                    g_rpod_mode_hold=(ret==2)?12:11;
+                    if(ret==2){
+                        g_docked_latched=1;
+                        g_is_braking=-1;
+                        _reset_terminal_guidance();
+                        new_acc[0]=0.0; new_acc[1]=0.0; new_acc[2]=0.0;
+                    }
                 }
             }else{
                 g_docked_latched=1;
                 g_rpod_mode_hold=12;
                 g_is_braking=-1;
                 g_terminal_inflated=0;
+                _reset_terminal_guidance();
             }
             g_accel_lvlh_hold[0]=new_acc[0];
             g_accel_lvlh_hold[1]=new_acc[1];
@@ -345,7 +394,7 @@ CommandFrame *flight_loop_step(void){
         }
     }
 
-    /* ── Timing ────────────────────────────────────────────────── */
+    /* ?????? Timing ?????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????? */
     double loop_t=_get_time_ms()-t_start;
     if(loop_t>g_max_loop_ms) g_max_loop_ms=loop_t;
     if(loop_t>g_deadline_ms) g_missed++;
@@ -372,7 +421,7 @@ void flight_loop_stop(void){g_running=0;}
 void flight_loop_reset(void){
     g_tick=0;g_max_loop_ms=0.0;g_missed=0;g_is_braking=-1;
     g_accel_lvlh_hold[0]=g_accel_lvlh_hold[1]=g_accel_lvlh_hold[2]=0.0;
-    g_rpod_mode_hold=-1; g_docked_latched=0; g_terminal_inflated=0;
+    g_rpod_mode_hold=-1; g_docked_latched=0; g_terminal_inflated=0; _reset_terminal_guidance();
     _clear_attitude_holds();
     memset(&g_cmd_frame,0,sizeof(g_cmd_frame));
     memset(&g_sensor_frame,0,sizeof(g_sensor_frame));
@@ -391,7 +440,7 @@ int main(void){
     double P0[36]={0}; for(int i=0;i<6;i++) P0[i*6+i]=(i<3)?2500.0:0.25;
     flight_loop_seed_thekf(x0,P0,0.0);
     SensorFrame *sf=flight_loop_get_sensor_frame();
-    /* High rate → DETUMBLE */
+    /* High rate ??? DETUMBLE */
     sf->gyro.omega_xyz[0]=0.5; sf->gyro.omega_xyz[1]=0.3; sf->gyro.omega_xyz[2]=0.2; sf->gyro.valid=1;
     sf->mag.body[0]=2e-5; sf->mag.body[1]=1e-5; sf->mag.body[2]=4e-5;
     sf->mag.inertial[0]=2e-5; sf->mag.inertial[1]=1e-5; sf->mag.inertial[2]=4e-5; sf->mag.valid=1;
@@ -415,3 +464,5 @@ int main(void){
     return 0;
 }
 #endif
+
+

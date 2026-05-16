@@ -19,3 +19,5 @@ __pycache__/
 # Keep:
 # .vscode/c_cpp_properties.json  (IntelliSense config)
 !.vscode/c_cpp_properties.json
+build_results/
+pyrightconfig.json
