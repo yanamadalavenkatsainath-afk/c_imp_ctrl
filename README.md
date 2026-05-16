@@ -1,24 +1,26 @@
 # Satellite GNC Embedded C
 
-Embedded C guidance, navigation, and control software for a GEO rendezvous, proximity operations, and docking (RPOD) stack. This repository is the flight-software/SIL port of the companion Python simulation in `C:\Users\Venkat\OneDrive\Desktop\appex\flight sim`.
+Embedded C guidance, navigation, and control software for a GEO rendezvous, proximity operations, and docking (RPOD) stack. The repository contains the flight-software/SIL implementation of the RPOD, relative navigation, attitude estimation, ADCS, and mode-management logic used for a 50 kg GEO servicing deputy concept.
 
-The intent is simple: keep the Python model as the high-fidelity design and Monte Carlo environment, and keep this repository as the embedded-C implementation that can be built, unit-tested, and driven in software-in-the-loop.
+The code is structured as a portable C core with a Python software-in-the-loop harness. Python supplies the simulated plant and sensor packets during SIL; the C side owns the flight-loop state, estimators, mode transitions, guidance commands, actuator limits, and FDIR guards.
 
-## Current Verification Status
+> Status: research/prototype flight software. This is not flight-certified code.
 
-Latest verified C build: `build_results/run_20260516_231455/build.log`
+## Verification Status
+
+Latest local verification run: `build_results/run_20260516_231455/build.log`
 
 Result: `=== ALL PASS ===`
 
-The build completed:
+The verification pipeline completed:
 
 - C DLL build for `gnc_lib.dll`
-- C unit tests for navigation, attitude, ADCS, mode management, Lambert utilities, chief pose, and RPOD
+- C unit tests for relative navigation, MEKF, QUEST, ADCS, mode management, Lambert utilities, chief pose estimation, and RPOD guidance
 - Python/C TH-EKF parity checks
-- real-time SIL timing/fault-injection checks
-- closed-loop SIL scenarios for detumble, acquisition, proximity ops, and long fine-pointing guard behavior
+- real-time SIL timing and fault-injection checks
+- closed-loop SIL scenarios for detumble, acquisition, proximity operations, docking, and long fine-pointing guard behavior
 
-Build outputs and logs are local artifacts. Do not push `build_results/`, generated executables, DLLs, or generated Python config files unless intentionally sharing a run artifact.
+Build outputs are local artifacts and are intentionally ignored for normal commits.
 
 ## Repository Layout
 
@@ -35,7 +37,7 @@ Satellite_GNC/
     adcs.*                   B-dot, reaction wheel, MTQ, attitude control
     mode_manager.*           FSW mode transitions and safe-mode guards
     rpod_ctrl.*              PROX_OPS, TERMINAL, LOST_TARGET RPOD guidance
-    terminal_filter.*         Terminal relative-nav smoothing
+    terminal_filter.*        Terminal relative-nav smoothing
     port_tracker.*           Docking-port measurement gate and short-coast tracker
     lambert_solver.*         Lambert solver utilities
     chief_pose_estimator.*   Chief pose estimator prototype
@@ -44,14 +46,14 @@ Satellite_GNC/
     realtime_driver.py       100 Hz flight-loop driver
     verify_sil.py            Python/C TH-EKF parity check
     verify_realtime_sil.py   Timing, dropout, spike, and gyro-bias tests
-    closed_loop_sil.py       C flight loop closed around Python plant
+    closed_loop_sil.py       C flight loop closed around a Python plant
   tests/                     C unit tests
   build_results/             Generated logs, ignored for normal commits
 ```
 
 ## Architecture
 
-The C flight loop runs at 100 Hz. Navigation and guidance logic run as lower-rate tasks inside that loop, while Python supplies the simulated plant and sensor packets during SIL.
+The C flight loop runs at 100 Hz. Navigation and guidance tasks execute inside that loop at their configured rates, while SIL drivers provide simulated sensor packets and consume command packets.
 
 ```text
 Python plant / truth model
@@ -75,18 +77,16 @@ CommandFrame
 Python plant applies commanded accel, wheel torque, and MTQ dipole
 ```
 
-The interface is plain C by design:
+The C/Python interface is intentionally packet-like:
 
 - `SensorFrame` carries gyro, range, camera, docking-port, magnetometer, sun-sensor, and fault inputs.
 - `CommandFrame` carries navigation state, attitude state, actuator commands, RPOD commands, timing, and mode telemetry.
-
-That keeps the SIL boundary close to a flight packet interface rather than a Python-only function call.
 
 ## Implemented Flight Software
 
 ### Relative Navigation
 
-`th_ekf.c` implements the C relative navigation filter used by the flight loop. It supports propagation, range/angle updates, close-range camera position updates, covariance tracking, and innovation gating. The build checks it against the Python reference model.
+`th_ekf.c` implements the relative navigation filter used by the flight loop. It supports propagation, range/angle updates, close-range camera position updates, covariance tracking, and innovation gating. The SIL pipeline checks it against the Python reference model.
 
 ### Attitude Estimation
 
@@ -94,11 +94,11 @@ That keeps the SIL boundary close to a flight packet interface rather than a Pyt
 
 ### ADCS
 
-`adcs.c` includes B-dot detumble, reaction-wheel torque command handling, magnetorquer momentum dumping, and fine-pointing PD control. The SIL plant clamps torque consistently with the C actuator model so the commanded and simulated dynamics stay aligned.
+`adcs.c` includes B-dot detumble, reaction-wheel torque command handling, magnetorquer momentum dumping, and fine-pointing PD control. The SIL plant clamps torque consistently with the C actuator model so commanded and simulated dynamics stay aligned.
 
 ### Mode Management
 
-`mode_manager.c` handles:
+`mode_manager.c` handles the primary ADCS mode chain:
 
 ```text
 DETUMBLE -> SUN_ACQUISITION -> FINE_POINTING -> MOMENTUM_DUMP
@@ -108,17 +108,17 @@ It also includes safe-mode and recovery guard logic for excessive angular rate a
 
 ### RPOD Guidance
 
-`rpod_ctrl.c` implements the embedded version of the Python RPOD law.
+`rpod_ctrl.c` implements the embedded RPOD guidance law.
 
 Current phases:
 
-- `FORMATION_HOLD`: station keeping before RPOD activation.
-- `PROX_OPS`: translational closure with a square-root closing-speed law.
-- `TERMINAL`: close-range docking-port approach with filtered terminal navigation.
-- `LOST_TARGET`: velocity-null hold when terminal camera validity is lost for the debounce window.
-- `DOCKED`: latched in `flight_loop.c` after successful docking confirmation.
+- `FORMATION_HOLD`: station keeping before RPOD activation
+- `PROX_OPS`: translational closure with a square-root closing-speed law
+- `TERMINAL`: close-range docking-port approach with filtered terminal navigation
+- `LOST_TARGET`: velocity-null hold when terminal camera validity is lost for the debounce window
+- `DOCKED`: latched in `flight_loop.c` after successful docking confirmation
 
-Current terminal tuning mirrors the cleaned Python simulation:
+Current terminal tuning:
 
 ```c
 RPOD_TERMINAL_M          = 5.0      // PROX_OPS -> TERMINAL handoff
@@ -132,22 +132,20 @@ RPOD_DOCK_MAX_SPEED_MS   = 0.050    // 50 mm/s docking speed gate
 
 ## Terminal Filtering And FDIR
 
-The terminal C path now includes lightweight filters added in Python:
+The terminal C path includes two small flight-software filters:
 
-- `terminal_filter.c/.h`: terminal alpha-beta relative navigation filter
-- `port_tracker.c/.h`: docking-port position tracker with short coast capability
-- innovation gating for terminal measurements
-- velocity clamp on terminal filtered velocity
+- `terminal_filter.c/.h`: alpha-beta relative navigation smoothing in the terminal phase
+- `port_tracker.c/.h`: docking-port measurement gate and short-coast tracker
+
+Implemented terminal guards:
+
+- terminal measurement innovation gating
+- filtered velocity clamp
 - camera-loss debounce before `LOST_TARGET`
+- velocity-null hold during `LOST_TARGET`
+- terminal filter reset after target reacquisition
 
-These are intentionally small flight-software filters, not a new full EKF. They smooth the final few meters and prevent one noisy camera/port sample from dominating the command.
-
-Terminal camera validity behavior:
-
-- valid camera: update terminal nav filter and continue terminal guidance
-- short invalid camera: coast/hold through the filter
-- invalid camera for 2 s: enter `LOST_TARGET` and command velocity-null hold
-- recovered camera: reset terminal filter and resume guidance
+These are intentionally lightweight filters, not a second full EKF. They smooth the final few meters and prevent one noisy terminal measurement from dominating the command.
 
 ## Build And Test
 
@@ -156,21 +154,21 @@ Prerequisites on Windows:
 - Python available as `python`
 - GCC available on `PATH`
 - PowerShell available for timestamped logging
-- companion Python simulation at `C:\Users\Venkat\OneDrive\Desktop\appex\flight sim`
+- Python SIL dependencies installed for the scripts under `sim_python/`
 
-Run the full verification pipeline from the repo root:
+Run the full verification pipeline from the repository root:
 
 ```bat
 cmd /c build.bat
 ```
 
-The script builds the C DLL and test executables, runs unit tests, then runs Python/C SIL checks. Logs are saved under:
+The script builds the C DLL and test executables, runs unit tests, then runs Python/C SIL checks. Logs are generated under:
 
 ```text
 build_results/run_YYYYMMDD_HHMMSS/build.log
 ```
 
-After a build, individual tests can be run directly:
+Individual C tests can be run directly after building:
 
 ```bat
 test_thekf.exe
@@ -191,7 +189,7 @@ python sim_python\verify_realtime_sil.py
 python sim_python\closed_loop_sil.py
 ```
 
-## CDR Notes
+## CDR / FDIR Status
 
 Implemented CDR-grade items:
 
@@ -205,42 +203,39 @@ Implemented CDR-grade items:
 - terminal camera-loss debounce and `LOST_TARGET` hold
 - generated build logs for traceability
 
-FDIR/FMECA status:
+Implemented FDIR/FMECA coverage:
 
-- safe-mode guard exists for high angular rate and external fault input
-- sensor innovation gates exist in navigation and terminal filters
-- actuator commands are limited
-- camera dropout and spike behavior are exercised in SIL
-- deadline counters are reported
-- central fault-word management is not complete yet
+- safe-mode guard for high angular rate and external fault input
+- sensor innovation gates in navigation and terminal filters
+- actuator command limiting
+- camera dropout and spike tests in SIL
+- flight-loop deadline telemetry
 
-Known gaps before calling this flight-grade:
+Known gaps before flight-grade maturity:
 
 - central fault manager with latched fault words and severity levels
 - sensor freshness counters for every packet field
-- finite/NaN checks and covariance bound checks at the packet boundary
+- finite/NaN checks and covariance bound checks at packet boundaries
 - multi-sample docking confirmation
 - approach-axis and attitude-alignment gates for final docking
 - explicit retreat/abort strategy after prolonged terminal target loss
-- separate embedded target build from PC/SIL build
-- full HIL packet specification
+- embedded-target build separate from PC/SIL build
+- HIL packet specification and hardware timing validation
 
-## Push Hygiene
+## Git Hygiene
 
-Commit source, tests, and documentation. Do not commit generated artifacts from a local build:
+Commit source, tests, and documentation. Do not commit generated local artifacts unless intentionally publishing a run package:
 
 - `build_results/`
 - `*.exe`
 - `*.dll`
 - `*.o` / `*.obj`
-- `pyrightconfig.json`
+- generated Python config files
 
-If `git status` shows tracked build metadata such as `build_results/latest_path.txt`, restore or unstage it before pushing unless you intentionally want that local run pointer in the commit.
+If a tracked local build pointer changes, restore or unstage it before pushing unless it is intentionally part of the commit.
 
 ## Author
 
-Venkat Sainath  
+Venkat Sainath
+
 MSc Space Engineering
-
-
-
