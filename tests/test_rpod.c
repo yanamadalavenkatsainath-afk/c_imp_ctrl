@@ -29,6 +29,7 @@ static double norm3(const double v[3]) {
 static void init_term_state(RPOD_TermState *s) {
     memset(s, 0, sizeof(*s));
     s->port_axis_lvlh[2] = 1.0;
+    s->geometry_ok = 1;
 }
 
 
@@ -174,8 +175,8 @@ static void test_terminal_decel(void) {
 /* ── Test 5: TERMINAL — docking condition ───────────────────────
    At range < RPOD_DOCK_DONE_M RPOD_terminal returns 2 (docked). */
 static void test_terminal_docking(void) {
-    printf("\nTest 5: TERMINAL docking detection at range < %.0fcm\n",
-           RPOD_DOCK_DONE_M * 100.0);
+    printf("\nTest 5: TERMINAL soft-capture request at range < %.0fcm\n",
+           RPOD_DOCK_RANGE_M * 100.0);
 
     double accel_max = 0.020;
 
@@ -190,8 +191,9 @@ static void test_terminal_docking(void) {
     double accel[3];
     int ret = RPOD_terminal_simple(&state, accel_max, accel);
 
-    CHECK(ret == 2, "TERMINAL returns 2 (docked) when range < dock gate");
-    CHECK(norm3(accel) < 1e-9, "zero accel output when docked");
+    CHECK(ret == RPOD_RET_SOFT_CAPTURE_READY,
+          "TERMINAL requests SOFT_CAPTURE instead of declaring hard dock");
+    CHECK(norm3(accel) > 0.0, "terminal still commands controlled approach");
     printf("  ret = %d  |accel| = %.2e\n", ret, norm3(accel));
 }
 
@@ -242,8 +244,12 @@ static void test_terminal_offset_port_target(void) {
     int brake = 0;
     int ret = RPOD_terminal(&state, accel_max, accel, &brake);
 
-    CHECK(ret == 2, "TERMINAL docks on port range even when CoM is about 0.46m");
-    CHECK(norm3(accel) < 1e-9, "zero accel output after port docking");
+    RPOD_fill_geometry(&state);
+    ret = RPOD_terminal(&state, accel_max, accel, &brake);
+
+    CHECK(ret == RPOD_RET_SOFT_CAPTURE_READY,
+          "TERMINAL uses port range to request soft capture even when CoM is about 0.46m");
+    CHECK(norm3(accel) > 0.0, "terminal command remains active until hard capture");
     printf("  ret = %d  com=%.2fm  port=%.2fm\n",
            ret, norm3(state.pos),
            fabs(state.port_lvlh[2] - state.pos[2]));
@@ -297,8 +303,36 @@ static void test_prox_deadband(void) {
        to TERMINAL, which returns 1 and zeros accel */
     double accel[3];
     RPOD_prox_ops(&state, 0.03, n_chief, accel_max, accel);
-    CHECK(norm3(accel) < 1e-9,
-          "zero accel inside docking zone (terminal path)");
+    CHECK(norm3(accel) > 0.0,
+          "terminal path remains controlled inside the soft-capture zone");
+}
+
+static void test_terminal_soft_capture_hold(void) {
+    printf("\nTest 8: SOFT_CAPTURE damps to hard-capture gate\n");
+
+    double accel_max = 0.020;
+    RPOD_TermState state;
+    init_term_state(&state);
+    state.pos[0] = 0.0;
+    state.pos[1] = 0.0;
+    state.pos[2] = 0.046;
+    state.vel[0] = 0.0;
+    state.vel[1] = 0.0;
+    state.vel[2] = 0.0005;
+    state.port_lvlh[0] = 0.0;
+    state.port_lvlh[1] = 0.0;
+    state.port_lvlh[2] = 0.050;
+    state.has_port = 1;
+    RPOD_fill_geometry(&state);
+
+    double accel[3];
+    int ret = RPOD_soft_capture(&state, accel_max, accel);
+
+    CHECK(ret == RPOD_RET_DOCKED,
+          "SOFT_CAPTURE reports hard-capture-ready for low range and low vrel");
+    CHECK(norm3(accel) > 0.0,
+          "SOFT_CAPTURE applies spring-damper capture command");
+    printf("  ret = %d  |accel| = %.2e\n", ret, norm3(accel));
 }
 
 
@@ -346,6 +380,7 @@ int main(void) {
     test_terminal_port_prevents_com_dock();
     test_prox_deadband();
     test_terminal_vmax();
+    test_terminal_soft_capture_hold();
 
     printf("\n=== %s (%d failures) ===\n",
            n_fail == 0 ? "ALL PASS" : "FAILURES DETECTED", n_fail);

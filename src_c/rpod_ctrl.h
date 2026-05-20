@@ -55,13 +55,31 @@
 #define RPOD_V_TERM_MAX_MS     0.025    /* max speed in TERMINAL [m/s]      */
 #define RPOD_V_APPROACH_MS     0.010    /* speed below approach band [m/s]  */
 #define RPOD_V_CAPTURE_MS      0.005    /* speed inside capture zone [m/s]  */
-#define RPOD_DOCK_RANGE_M      0.30     /* capture sphere radius [m]        */
-#define RPOD_DOCK_DONE_M       0.20     /* docking complete [m]             */
+#define RPOD_DOCK_RANGE_M      0.30     /* soft-capture port gate [m]       */
+#define RPOD_DOCK_DONE_M       0.20     /* legacy alias for capture gate    */
 #define RPOD_DOCK_MAX_SPEED_MS 0.050    /* max port-relative dock speed     */
 #define RPOD_PORT_SANITY_M     2.0      /* EKF spike guard: max port dist   */
 #define RPOD_APPROACH_M        0.80     /* terminal approach speed band [m] */
 #define RPOD_BRAKE_DONE_MS     0.010    /* entry brake target speed [m/s]   */
 #define RPOD_BRAKE_ENTRY_MS    0.015    /* brake if entry speed > this [m/s]*/
+
+#define RPOD_RET_LOST_TARGET          -1
+#define RPOD_RET_NORMAL                0
+#define RPOD_RET_CAPTURE_ZONE          1
+#define RPOD_RET_DOCKED                2
+#define RPOD_RET_SOFT_CAPTURE_READY    3
+
+/* Python terminal/capture parity constants */
+#define RPOD_HARD_CAPTURE_RANGE_M      0.08
+#define RPOD_HARD_CAPTURE_VREL_MS      0.010
+#define RPOD_HARD_CAPTURE_HOLD_S       5.0
+#define RPOD_DOCK_ALIGN_MAX_DEG        10.0
+#define RPOD_DOCK_CONE_HALF_ANGLE_DEG  15.0
+#define RPOD_DOCK_PORT_APERTURE_M      0.15
+#define RPOD_DOCK_CONE_MIN_RANGE_M     0.05
+#define RPOD_DOCK_FACE_TOL_M           0.05
+#define RPOD_SOFT_CAPTURE_KP           0.010
+#define RPOD_SOFT_CAPTURE_KD           0.250
 
 /* TAU gain scheduling thresholds */
 #define RPOD_TAU_CLOSE         8.0      /* TAU [s] for com_range < 0.30m   */
@@ -103,7 +121,14 @@ typedef struct {
     double port_lvlh[3];
     double port_axis_lvlh[3];
     double port_vel_lvlh[3];
+    double attitude_align_deg;
+    double cone_angle_deg;
+    double cone_error_deg;
+    double lateral_m;
     int    has_port;
+    int    has_attitude_align;
+    int    has_geometry;
+    int    geometry_ok;
 } RPOD_TermState;
 
 /**
@@ -155,15 +180,35 @@ int RPOD_prox_ops(const RPOD_State *state,
  *             = 0 when brake is done or not needed.
  *
  * Returns:
- *    2 = DOCKED (range < RPOD_DOCK_DONE_M, zero accel)
- *    1 = in capture zone (port_range < RPOD_DOCK_RANGE_M)
- *    0 = normal approach
- *   -1 = entry brake in progress
+ *    RPOD_RET_SOFT_CAPTURE_READY = soft-capture gate reached
+ *    RPOD_RET_CAPTURE_ZONE       = inside capture sphere but not gated
+ *    RPOD_RET_NORMAL             = normal approach
+ *    RPOD_RET_LOST_TARGET        = entry brake in progress
  */
 int RPOD_terminal(const RPOD_TermState *state,
                   double accel_max,
                   double accel_out[3],
                   int *is_braking);
+
+/**
+ * RPOD_soft_capture -- compliant port hold after soft capture.
+ *
+ * This mirrors Python _soft_capture(): small spring-damper on the port error.
+ * Returns RPOD_RET_DOCKED once hard-capture range and speed are satisfied;
+ * otherwise returns RPOD_RET_CAPTURE_ZONE.
+ */
+int RPOD_soft_capture(const RPOD_TermState *state,
+                      double accel_max,
+                      double accel_out[3]);
+
+/**
+ * RPOD_fill_geometry -- finite body / approach-cone gate from port pose.
+ *
+ * Uses existing port pose fields, so it is safe for PC SIL packets that do
+ * not carry a separate geometry packet. The function fills cone/lateral
+ * telemetry fields and sets geometry_ok.
+ */
+void RPOD_fill_geometry(RPOD_TermState *state);
 
 /**
  * RPOD_terminal_simple — 3-argument version for test_rpod.c compatibility.

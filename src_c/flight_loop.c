@@ -67,6 +67,8 @@ static double g_dipole_mtq_hold[3] = {0.0, 0.0, 0.0};
 static double g_torque_rw_hold[3]  = {0.0, 0.0, 0.0};
 static int    g_rpod_mode_hold     = -1;
 static int    g_docked_latched     = 0;
+static int    g_soft_capture_active = 0;
+static double g_hard_capture_hold_s = 0.0;
 static int    g_terminal_inflated  = 0;
 static TermNavFilter g_terminal_nav;
 static PortTracker   g_port_tracker;
@@ -78,6 +80,8 @@ static void _reset_terminal_guidance(void){
     PT_reset(&g_port_tracker);
     g_terminal_cam_lost_s = -1.0;
     g_lost_target_active = 0;
+    g_soft_capture_active = 0;
+    g_hard_capture_hold_s = 0.0;
 }
 
 static void _clear_attitude_holds(void){
@@ -316,7 +320,7 @@ CommandFrame *flight_loop_step(void){
                 g_is_braking=-1;
                 g_terminal_inflated=0;
                 _reset_terminal_guidance();
-            }else if(tr>RPOD_DOCK_DONE_M){
+            }else{
                 if(!g_terminal_inflated){
                     THEKF_inflate_process_noise(&g_thekf,10.0);
                     g_terminal_inflated=1;
@@ -328,6 +332,13 @@ CommandFrame *flight_loop_step(void){
                                  guided_pos, guided_vel);
                 ts.pos[0]=guided_pos[0]; ts.pos[1]=guided_pos[1]; ts.pos[2]=guided_pos[2];
                 ts.vel[0]=guided_vel[0]; ts.vel[1]=guided_vel[1]; ts.vel[2]=guided_vel[2];
+                ts.attitude_align_deg=0.0;
+                ts.cone_angle_deg=0.0;
+                ts.cone_error_deg=0.0;
+                ts.lateral_m=0.0;
+                ts.has_attitude_align=1;
+                ts.has_geometry=0;
+                ts.geometry_ok=1;
                 ts.has_port=PT_update(&g_port_tracker, sf->port.port_lvlh,
                                                   sf->port.valid ? 1 : 0,
                                                   0.1, tracked_port);
@@ -351,6 +362,7 @@ CommandFrame *flight_loop_step(void){
                     ts.port_axis_lvlh[0]=0.0; ts.port_axis_lvlh[1]=0.0; ts.port_axis_lvlh[2]=1.0;
                     ts.port_vel_lvlh[0]=0.0; ts.port_vel_lvlh[1]=0.0; ts.port_vel_lvlh[2]=0.0;
                 }
+                RPOD_fill_geometry(&ts);
 
                 if(!sf->camera.valid){
                     if(g_terminal_cam_lost_s < 0.0) g_terminal_cam_lost_s = t_sim;
@@ -368,21 +380,29 @@ CommandFrame *flight_loop_step(void){
                     RPOD_lost_target(&g_rpod_state, ar, new_acc);
                     g_rpod_mode_hold=13;
                 }else{
-                    int ret=RPOD_terminal(&ts,ar,new_acc,&g_is_braking);
-                    g_rpod_mode_hold=(ret==2)?12:11;
-                    if(ret==2){
-                        g_docked_latched=1;
-                        g_is_braking=-1;
-                        _reset_terminal_guidance();
-                        new_acc[0]=0.0; new_acc[1]=0.0; new_acc[2]=0.0;
+                    if(g_soft_capture_active){
+                        int ret=RPOD_soft_capture(&ts,ar,new_acc);
+                        g_rpod_mode_hold=14;
+                        (void)ret;
+                        g_hard_capture_hold_s += 0.1;
+                        if(g_hard_capture_hold_s >= RPOD_HARD_CAPTURE_HOLD_S){
+                            g_docked_latched=1;
+                            g_rpod_mode_hold=12;
+                            g_is_braking=-1;
+                            _reset_terminal_guidance();
+                            new_acc[0]=0.0; new_acc[1]=0.0; new_acc[2]=0.0;
+                        }
+                    }else{
+                        int ret=RPOD_terminal(&ts,ar,new_acc,&g_is_braking);
+                        g_rpod_mode_hold=11;
+                        if(ret==RPOD_RET_SOFT_CAPTURE_READY){
+                            g_soft_capture_active=1;
+                            g_hard_capture_hold_s=0.0;
+                            g_is_braking=-1;
+                            g_rpod_mode_hold=14;
+                        }
                     }
                 }
-            }else{
-                g_docked_latched=1;
-                g_rpod_mode_hold=12;
-                g_is_braking=-1;
-                g_terminal_inflated=0;
-                _reset_terminal_guidance();
             }
             g_accel_lvlh_hold[0]=new_acc[0];
             g_accel_lvlh_hold[1]=new_acc[1];

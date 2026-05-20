@@ -8,7 +8,7 @@ The code is structured as a portable C core with a Python software-in-the-loop h
 
 ## Verification Status
 
-Latest local verification run: `build_results/run_20260516_231455/build.log`
+Latest local verification run: `build_results/run_20260520_175716/build.log`
 
 Result: `=== ALL PASS ===`
 
@@ -18,7 +18,7 @@ The verification pipeline completed:
 - C unit tests for relative navigation, MEKF, QUEST, ADCS, mode management, Lambert utilities, chief pose estimation, and RPOD guidance
 - Python/C TH-EKF parity checks
 - real-time SIL timing and fault-injection checks
-- closed-loop SIL scenarios for detumble, acquisition, proximity operations, docking, and long fine-pointing guard behavior
+- closed-loop SIL scenarios for detumble, acquisition, proximity operations, terminal soft capture, docking, and long fine-pointing guard behavior
 
 Build outputs are local artifacts and are intentionally ignored for normal commits.
 
@@ -36,7 +36,7 @@ Satellite_GNC/
     quest.*                  QUEST/TRIAD attitude initialization
     adcs.*                   B-dot, reaction wheel, MTQ, attitude control
     mode_manager.*           FSW mode transitions and safe-mode guards
-    rpod_ctrl.*              PROX_OPS, TERMINAL, LOST_TARGET RPOD guidance
+    rpod_ctrl.*              PROX_OPS, TERMINAL, SOFT_CAPTURE, LOST_TARGET RPOD guidance
     terminal_filter.*        Terminal relative-nav smoothing
     port_tracker.*           Docking-port measurement gate and short-coast tracker
     lambert_solver.*         Lambert solver utilities
@@ -108,13 +108,14 @@ It also includes safe-mode and recovery guard logic for excessive angular rate a
 
 ### RPOD Guidance
 
-`rpod_ctrl.c` implements the embedded RPOD guidance law.
+`rpod_ctrl.c` implements the embedded RPOD guidance law and mirrors the Python terminal-contact sequence closely enough for SIL parity.
 
 Current phases:
 
 - `FORMATION_HOLD`: station keeping before RPOD activation
 - `PROX_OPS`: translational closure with a square-root closing-speed law
 - `TERMINAL`: close-range docking-port approach with filtered terminal navigation
+- `SOFT_CAPTURE`: compliant post-contact port hold before hard-capture latch
 - `LOST_TARGET`: velocity-null hold when terminal camera validity is lost for the debounce window
 - `DOCKED`: latched in `flight_loop.c` after successful docking confirmation
 
@@ -125,10 +126,19 @@ RPOD_TERMINAL_M          = 5.0      // PROX_OPS -> TERMINAL handoff
 RPOD_V_TERM_MAX_MS       = 0.025    // 25 mm/s terminal max command
 RPOD_V_APPROACH_MS       = 0.010    // 10 mm/s below 0.8 m
 RPOD_V_CAPTURE_MS        = 0.005    // 5 mm/s below 0.3 m
-RPOD_DOCK_RANGE_M        = 0.30     // capture zone
-RPOD_DOCK_DONE_M         = 0.20     // docking-complete range
+RPOD_DOCK_RANGE_M        = 0.30     // soft-capture port gate
+RPOD_DOCK_DONE_M         = 0.20     // legacy capture alias
 RPOD_DOCK_MAX_SPEED_MS   = 0.050    // 50 mm/s docking speed gate
+RPOD_HARD_CAPTURE_RANGE_M = 0.08    // hard-capture latch range
+RPOD_HARD_CAPTURE_VREL_MS = 0.010   // hard-capture latch speed
+RPOD_HARD_CAPTURE_HOLD_S  = 5.0     // latch dwell time
+RPOD_DOCK_CONE_HALF_ANGLE_DEG = 15.0
+RPOD_DOCK_ALIGN_MAX_DEG       = 10.0
 ```
+
+Terminal capture uses the docking-port frame, not just chief-COM range. The C state includes port range, port velocity, port axis, approach-cone error, lateral aperture error, and attitude-alignment fields. `RPOD_terminal()` returns `RPOD_RET_SOFT_CAPTURE_READY` when the soft-capture gate is met. `flight_loop.c` then enters soft capture and latches `DOCKED` after the hard-capture hold.
+
+The soft-capture controller is intentionally lightweight: a small spring-damper holds the deputy at the port until the hard-capture range and velocity criteria are stable. This matches the Python simulation's current soft/hard capture abstraction without pretending to model detailed mechanical latch hardware.
 
 ## Terminal Filtering And FDIR
 
@@ -144,6 +154,9 @@ Implemented terminal guards:
 - camera-loss debounce before `LOST_TARGET`
 - velocity-null hold during `LOST_TARGET`
 - terminal filter reset after target reacquisition
+- finite chief-body / docking-port geometry gate
+- approach-cone gate
+- hard-capture dwell confirmation after soft capture
 
 These are intentionally lightweight filters, not a second full EKF. They smooth the final few meters and prevent one noisy terminal measurement from dominating the command.
 
@@ -197,8 +210,8 @@ Implemented CDR-grade items:
 - 100 Hz flight-loop timing telemetry
 - closed-loop SIL with C commands driving a Python plant
 - RPOD terminal docking-port targeting
-- DOCKED latch after terminal contact
-- docking speed gate
+- soft-capture and hard-capture state sequence
+- docking range, speed, approach-cone, and geometry gates
 - terminal navigation filter and port tracker
 - terminal camera-loss debounce and `LOST_TARGET` hold
 - generated build logs for traceability
@@ -216,10 +229,8 @@ Known gaps before flight-grade maturity:
 - central fault manager with latched fault words and severity levels
 - sensor freshness counters for every packet field
 - finite/NaN checks and covariance bound checks at packet boundaries
-- multi-sample docking confirmation
-- approach-axis and attitude-alignment gates for final docking
+- target-hardware build separate from PC/SIL build
 - explicit retreat/abort strategy after prolonged terminal target loss
-- embedded-target build separate from PC/SIL build
 - HIL packet specification and hardware timing validation
 
 ## Git Hygiene
