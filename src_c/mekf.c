@@ -353,3 +353,85 @@ void MEKF_update(MEKF_State *s,
     /* Bias update */
     s->bias[0]+=dx[3]; s->bias[1]+=dx[4]; s->bias[2]+=dx[5];
 }
+
+void MEKF_update_star_tracker(MEKF_State *s,
+                              const MEKF_FLOAT q_meas_in[MEKF_NQ],
+                              const MEKF_FLOAT R_st[MEKF_NZ][MEKF_NZ]) {
+    if (!s || !q_meas_in || !R_st) return;
+
+    MEKF_FLOAT q_meas[4] = {
+        q_meas_in[0], q_meas_in[1], q_meas_in[2], q_meas_in[3]
+    };
+    quat_normalize(q_meas);
+
+    /* Sign consistency: choose the hemisphere closest to current estimate. */
+    MEKF_FLOAT dot = q_meas[0]*s->q[0] + q_meas[1]*s->q[1] +
+                     q_meas[2]*s->q[2] + q_meas[3]*s->q[3];
+    if (dot < 0.0f) {
+        for (int i=0;i<4;i++) q_meas[i] = -q_meas[i];
+    }
+
+    MEKF_FLOAT q_hat_conj[4] = {s->q[0], -s->q[1], -s->q[2], -s->q[3]};
+    MEKF_FLOAT dq_err[4];
+    quat_multiply(q_meas, q_hat_conj, dq_err);
+    if (dq_err[0] < 0.0f) {
+        for (int i=0;i<4;i++) dq_err[i] = -dq_err[i];
+    }
+
+    MEKF_FLOAT y[3] = {
+        2.0f*dq_err[1],
+        2.0f*dq_err[2],
+        2.0f*dq_err[3]
+    };
+
+    MEKF_FLOAT H[3][6];
+    memset(H, 0, sizeof(H));
+    H[0][0] = 1.0f; H[1][1] = 1.0f; H[2][2] = 1.0f;
+
+    MEKF_FLOAT HP[3][6], HT[6][3], HPHT[3][3], S[3][3];
+    mat_mul(&H[0][0],  &s->P[0][0], &HP[0][0],   3, 6, 6);
+    mat_trans(&H[0][0], &HT[0][0], 3, 6);
+    mat_mul(&HP[0][0], &HT[0][0],  &HPHT[0][0],  3, 6, 3);
+    mat_add(&HPHT[0][0], &R_st[0][0], &S[0][0], 3, 3);
+
+    MEKF_FLOAT S_inv[3][3];
+    if (inv3(S, S_inv) != 0) return;
+    MEKF_FLOAT Si_y[3];
+    mat_mul(&S_inv[0][0], y, Si_y, 3, 3, 1);
+    MEKF_FLOAT mahal = y[0]*Si_y[0]+y[1]*Si_y[1]+y[2]*Si_y[2];
+    if (mahal > 25.0f) return;
+
+    MEKF_FLOAT PHT[6][3], K[6][3];
+    mat_mul(&s->P[0][0], &HT[0][0], &PHT[0][0], 6, 6, 3);
+    mat_mul(&PHT[0][0], &S_inv[0][0], &K[0][0],  6, 3, 3);
+
+    MEKF_FLOAT dx[6];
+    mat_mul(&K[0][0], y, dx, 6, 3, 1);
+
+    MEKF_FLOAT KH[6][6], IKH[6][6];
+    mat_mul(&K[0][0], &H[0][0], &KH[0][0], 6, 3, 6);
+    for (int i=0;i<6;i++)
+        for (int j=0;j<6;j++)
+            IKH[i][j] = (i==j ? 1.0f : 0.0f) - KH[i][j];
+
+    MEKF_FLOAT IKHP[6][6], IKHT[6][6], IKHPIKHT[6][6];
+    mat_mul(&IKH[0][0], &s->P[0][0], &IKHP[0][0],      6, 6, 6);
+    mat_trans(&IKH[0][0], &IKHT[0][0], 6, 6);
+    mat_mul(&IKHP[0][0], &IKHT[0][0], &IKHPIKHT[0][0], 6, 6, 6);
+
+    MEKF_FLOAT KT[3][6], KR[6][3], KRKT[6][6];
+    mat_trans(&K[0][0], &KT[0][0], 6, 3);
+    mat_mul(&K[0][0], &R_st[0][0], &KR[0][0],  6, 3, 3);
+    mat_mul(&KR[0][0], &KT[0][0], &KRKT[0][0], 6, 3, 6);
+
+    mat_add(&IKHPIKHT[0][0], &KRKT[0][0], &s->P[0][0], 6, 6);
+    sym6_pd(&s->P[0][0]);
+
+    MEKF_FLOAT dq_corr[4] = {1.0f, 0.5f*dx[0], 0.5f*dx[1], 0.5f*dx[2]};
+    MEKF_FLOAT q_new[4];
+    quat_multiply(dq_corr, s->q, q_new);
+    quat_normalize(q_new);
+    for (int i=0;i<4;i++) s->q[i]=q_new[i];
+
+    s->bias[0]+=dx[3]; s->bias[1]+=dx[4]; s->bias[2]+=dx[5];
+}

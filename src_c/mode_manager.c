@@ -6,7 +6,7 @@
  */
 
 #include "mode_manager.h"
-#include <stdio.h>
+#include "target_port.h"
 #include <math.h>
 #include <string.h>
 
@@ -15,7 +15,7 @@
 static void _transition(MM_State *s, FSW_Mode new_mode, double t) {
     if (new_mode == s->mode) return;
 
-    printf("  FSW [%7.1fs] %-20s -> %s\n",
+    GNC_LOG("  FSW [%7.1fs] %-20s -> %s\n",
            t, MM_mode_name(s->mode), MM_mode_name(new_mode));
 
     s->prev_mode    = s->mode;
@@ -42,7 +42,7 @@ void MM_init(MM_State *s) {
     s->pointing_err_valid = 0;
     s->pointing_err_deg  = -1.0;
     s->history_count     = 0;
-    printf("  FSW ModeManager initialised — starting in DETUMBLE\n");
+    GNC_LOG("  FSW ModeManager initialised — starting in DETUMBLE\n");
 }
 
 FSW_Mode MM_update(MM_State *s,
@@ -107,7 +107,7 @@ FSW_Mode MM_update(MM_State *s,
 
         if (triad_ok || timed_out) {
             if (timed_out && !triad_ok)
-                printf("  FSW: Sun acq timeout at t=%.1fs — proceeding with q_exit seed\n", t);
+                GNC_LOG("  FSW: Sun acq timeout at t=%.1fs — proceeding with q_exit seed\n", t);
             _transition(s, MODE_FINE_POINTING, t);
         }
         return s->mode;

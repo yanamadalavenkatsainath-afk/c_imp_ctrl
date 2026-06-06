@@ -60,7 +60,7 @@ for p in [*_FLIGHT_SIM_SUBDIRS, _SIL_ROOT]:
         sys.path.insert(0, p)
 
 from sim_python.realtime_driver import (
-    FlightLoopDLL, SensorFrame, FakeSensorSim
+    FlightLoopDLL, SensorFrame, FakeSensorSim, stamp_frame_valid_packets
 )
 
 # -- Import Python plant models ---------------------------------
@@ -412,7 +412,7 @@ class PhysicsPlantSim:
 
 class ClosedLoopPlant:
     def __init__(self, x0_cw, omega0_body, q0_body,
-                 inertia=None, use_real_plant=True):
+                 inertia=None, use_real_plant=True, rng_seed: int = 42):
         self.t = 0.0
         self.use_real = use_real_plant and _HAVE_PLANT
 
@@ -438,7 +438,8 @@ class ClosedLoopPlant:
             self.omega_chief_lvlh = CHIEF_OMEGA_LVLH.copy()
             print("  ClosedLoopPlant: real Python plant models active")
         else:
-            self._phys = PhysicsPlantSim(x0_cw, omega0_body, q0_body)
+            self._phys = PhysicsPlantSim(x0_cw, omega0_body, q0_body,
+                                         rng_seed=rng_seed)
 
     def step(self, dt, accel_lvlh, torque_rw, dipole_mtq):
         if self.use_real:
@@ -556,7 +557,8 @@ def run_scenario(name: str, n_ticks: int,
                  x0_cw, omega0_body, q0_body,
                  dll: FlightLoopDLL,
                  log_every: int = 100,
-                 stop_on_docked: bool = False) -> list:
+                 stop_on_docked: bool = False,
+                 rng_seed: int = 42) -> list:
     print(f"\n{'-'*58}")
     print(f"  Scenario: {name}")
     print(f"{'-'*58}")
@@ -568,7 +570,8 @@ def run_scenario(name: str, n_ticks: int,
 
     plant = ClosedLoopPlant(
         x0_cw, omega0_body, q0_body,
-        use_real_plant=_USE_REAL_PLANT
+        use_real_plant=_USE_REAL_PLANT,
+        rng_seed=rng_seed
     )
     log   = []
     safe_entries_after_detumble = 0
@@ -578,6 +581,7 @@ def run_scenario(name: str, n_ticks: int,
     prev_rpod_mode              = -1
     last_rpod_debug_t           = -DEBUG_PRINT_PERIOD_S
     dump_returned               = False   # True when MOMENTUM_DUMP -> FINE_POINTING seen
+    total_dv_ms                 = 0.0
 
     t0 = time.perf_counter()
 
@@ -627,6 +631,7 @@ def run_scenario(name: str, n_ticks: int,
             "true_range":   plant_i.true_range,
             "true_vel":     np.asarray(plant_i.true_cw_vel),
             "safe_entries": safe_entries_after_detumble,
+            "total_dv_ms":  total_dv_ms,
         })
 
     for tick in range(n_ticks):
@@ -639,8 +644,12 @@ def run_scenario(name: str, n_ticks: int,
             accel_lvlh = np.array(list(cf.cmd.accel_lvlh))
             torque_rw  = np.array(list(cf.cmd.torque_rw))
             dipole_mtq = np.array(list(cf.cmd.dipole_mtq))
+            total_dv_ms += float(np.linalg.norm(accel_lvlh)) * DT_FAST
 
         sf_py = plant.step(DT_FAST, accel_lvlh, torque_rw, dipole_mtq)
+        sf_py.sim_tick = tick
+        sf_py.sim_time_s = tick * DT_FAST
+        stamp_frame_valid_packets(sf_py)
 
         dll_sf = dll.get_sensor_frame()
         ctypes.memmove(dll_sf, ctypes.addressof(sf_py),

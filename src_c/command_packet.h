@@ -4,6 +4,17 @@
 #ifndef COMMAND_PACKET_H
 #define COMMAND_PACKET_H
 #include <stdint.h>
+
+#define GNC_WD_FRAME_TICK_MISMATCH   (1u << 0)
+#define GNC_WD_GYRO_INVALID          (1u << 1)
+#define GNC_WD_RANGE_INVALID         (1u << 2)
+#define GNC_WD_CAMERA_INVALID        (1u << 3)
+#define GNC_WD_PORT_INVALID          (1u << 4)
+#define GNC_WD_MAG_INVALID           (1u << 5)
+#define GNC_WD_SUN_INVALID           (1u << 6)
+#define GNC_WD_SAFE_FALLBACK         (1u << 7)
+#define GNC_WD_OUTPUT_INHIBITED      (1u << 8)
+
 typedef struct {
     double pos_lvlh[3]; double vel_lvlh[3]; double pos_std[3];
     double vel_std[3];  double range_m;
@@ -22,6 +33,10 @@ typedef struct {
 typedef struct {
     uint64_t tick; double loop_time_ms; double max_loop_time_ms;
     uint32_t missed_deadlines; double deadline_ms;
+    uint32_t watchdog_flags;
+    uint32_t invalid_packet_count;
+    uint32_t stale_sensor_count;
+    uint32_t output_inhibited;
 } TimingTelemetry;
 typedef struct {
     double  port_range_m;

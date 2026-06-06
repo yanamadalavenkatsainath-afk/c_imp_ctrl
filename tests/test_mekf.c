@@ -131,6 +131,48 @@ int main(void) {
         CHECK(pos_ok, "P diagonal is positive");
     }
 
+    printf("\nTest 5: Star tracker quaternion update reduces attitude error\n");
+    {
+        MEKF_State s;
+        MEKF_init(&s, 0.1f);
+
+        float half = DEG2RAD(0.1f) * 0.5f;
+        MEKF_FLOAT q_meas[4] = {cosf(half), sinf(half), 0.0f, 0.0f};
+        MEKF_FLOAT R_st[3][3] = {
+            {3e-6f, 0, 0},
+            {0, 3e-6f, 0},
+            {0, 0, 3e-6f}
+        };
+        MEKF_update_star_tracker(&s, q_meas, R_st);
+
+        float qnorm = sqrtf(s.q[0]*s.q[0] + s.q[1]*s.q[1] +
+                            s.q[2]*s.q[2] + s.q[3]*s.q[3]);
+        printf("  q after ST update = [%.8f, %.8f, %.8f, %.8f]\n",
+               s.q[0], s.q[1], s.q[2], s.q[3]);
+        CHECK(fabsf(qnorm - 1.0f) < 1e-5f, "star tracker update preserves unit quaternion");
+        CHECK(fabsf(s.q[1]) > 1e-4f, "star tracker update applies attitude correction");
+        CHECK(s.P[0][0] < 3.046e-6f, "star tracker update reduces attitude covariance");
+    }
+
+    printf("\nTest 6: Star tracker gate rejects gross quaternion outlier\n");
+    {
+        MEKF_State s;
+        MEKF_init(&s, 0.1f);
+
+        MEKF_FLOAT q_before[4] = {s.q[0], s.q[1], s.q[2], s.q[3]};
+        MEKF_FLOAT q_bad[4] = {0.0f, 1.0f, 0.0f, 0.0f};
+        MEKF_FLOAT R_st[3][3] = {
+            {3e-6f, 0, 0},
+            {0, 3e-6f, 0},
+            {0, 0, 3e-6f}
+        };
+        MEKF_update_star_tracker(&s, q_bad, R_st);
+
+        float dq = fabsf(s.q[0]-q_before[0]) + fabsf(s.q[1]-q_before[1]) +
+                   fabsf(s.q[2]-q_before[2]) + fabsf(s.q[3]-q_before[3]);
+        CHECK(dq < 1e-7f, "gross star tracker quaternion is gated out");
+    }
+
     printf("\n=== %s (%d failures) ===\n",
            n_fail == 0 ? "ALL PASS" : "FAILURES DETECTED", n_fail);
     return n_fail == 0 ? 0 : 1;

@@ -26,7 +26,7 @@ if _ROOT not in sys.path:
 
 from sim_python.realtime_driver import (
     FlightLoopDLL, FakeSensorSim, SensorFrame, run_sil,
-    TelRow
+    TelRow, stamp_frame_valid_packets
 )
 import ctypes
 import time
@@ -84,6 +84,7 @@ def _run_batch(n_ticks: int, scenario: str, dll: FlightLoopDLL,
             sf_py.camera.valid = 1
             sf_py.camera.pos_lvlh[0] = 9999.0   # huge spike
 
+        stamp_frame_valid_packets(sf_py)
         dll_sf = dll.get_sensor_frame()
         ctypes.memmove(dll_sf, ctypes.addressof(sf_py),  # type: ignore[arg-type]
                        ctypes.sizeof(SensorFrame))
@@ -238,6 +239,7 @@ def test_gyro_bias(dll: FlightLoopDLL):
             for i in range(3):
                 sf_py.gyro.omega_xyz[i] += TRUE_BIAS_STEP
 
+        stamp_frame_valid_packets(sf_py)
         dll_sf = dll.get_sensor_frame()
         ctypes.memmove(dll_sf, ctypes.addressof(sf_py),  # type: ignore[arg-type]
                        ctypes.sizeof(SensorFrame))

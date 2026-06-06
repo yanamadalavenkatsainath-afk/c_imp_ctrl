@@ -15,7 +15,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>   /* rand(), RAND_MAX */
-#include <stdio.h>
+#include "target_port.h"
 
 /* ── Compile-time limits ──────────────────────────────────────── */
 #define CPE_MAX_PTS      CPE_MAX_MODEL_PTS
@@ -681,7 +681,7 @@ void CPE_init(CPE_State *s,
     double sig_pnp = sigma_pnp_deg*M_PI/180.0;
     for(int i=0;i<3;i++) s->R_meas[i][i]=sig_pnp*sig_pnp;
 
-    printf("  ChiefPoseEstimator (EKF): sigma_pnp=%.1fdeg  "
+    GNC_LOG("  ChiefPoseEstimator (EKF): sigma_pnp=%.1fdeg  "
            "sigma_omega_proc=%.4fdeg/s/sqrt(s)  gate=%.0fsigma\n",
            sigma_pnp_deg,
            sigma_omega_process*180.0/M_PI,

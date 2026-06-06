@@ -2,10 +2,9 @@
  * mekf.h — Multiplicative EKF for Spacecraft Attitude
  * =====================================================
  *
- * Port note: the vector-measurement MEKF path is ported here.  Python's
- * update_star_tracker() full-quaternion measurement update is not exposed
- * in this C API yet; add a dedicated MEKF_update_star_tracker() before
- * wiring a hardware star-tracker packet into the C flight loop.
+ * Port note: both Python MEKF measurement paths are exposed here:
+ * vector measurements via MEKF_update() and full-quaternion star-tracker
+ * measurements via MEKF_update_star_tracker().
  * Direct port of mekf.py — Markley & Crassidis §7.3
  *
  * State (error state, 6×1):
@@ -89,6 +88,16 @@ void MEKF_update(MEKF_State *s,
                  const MEKF_FLOAT z_body[3],
                  const MEKF_FLOAT v_inertial[3],
                  const MEKF_FLOAT R[MEKF_NZ][MEKF_NZ]);
+
+/**
+ * MEKF_update_star_tracker — full-quaternion attitude measurement update.
+ * q_meas[4] : measured attitude quaternion [w,x,y,z]
+ * R_st[3][3]: 3-vector attitude-error covariance
+ * Mirrors Python update_star_tracker().
+ */
+void MEKF_update_star_tracker(MEKF_State *s,
+                              const MEKF_FLOAT q_meas[MEKF_NQ],
+                              const MEKF_FLOAT R_st[MEKF_NZ][MEKF_NZ]);
 
 /* ── Convenience accessors ────────────────────────────────────── */
 static inline void MEKF_get_q   (const MEKF_State *s, MEKF_FLOAT out[4]) {

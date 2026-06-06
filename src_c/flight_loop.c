@@ -15,9 +15,9 @@
 #include "spin_sync_controller.h"
 #include "sensor_packet.h"
 #include "command_packet.h"
+#include "target_port.h"
 #include <math.h>
 #include <string.h>
-#include <stdio.h>
 #include <stdint.h>
 
 #ifdef _WIN32
@@ -47,6 +47,9 @@ static double   g_max_loop_ms=0.0;
 static uint32_t g_missed=0;
 static double   g_deadline_ms=10.0;
 static int      g_running=0;
+static uint32_t g_invalid_packet_count=0;
+static uint32_t g_stale_sensor_count=0;
+static uint32_t g_gyro_bad_ticks=0;
 /* Attitude reference. Identity is the default fine-pointing attitude. */
 static double g_q_ref[4] = {1.0,0.0,0.0,0.0};
 static SpinSyncController g_spin_sync_ctl;
@@ -358,14 +361,65 @@ static void _clear_attitude_holds(void){
     _reset_spin_sync();
 }
 
+#define GNC_GYRO_MAX_AGE_TICKS   2u
+#define GNC_10HZ_MAX_AGE_TICKS   15u
+#define GNC_GYRO_SAFE_TICKS      50u
+#define GNC_ACCEL_MAX_MS2        0.020
+#define GNC_MTQ_MAX_AM2          300.0
+#define TAU_PLANT_MAX_NM         2e-3
+
+static double _clampd(double v, double lo, double hi){
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+static int _packet_is_usable(uint8_t valid, int meta_ok, uint32_t invalid_flag,
+                             uint32_t *flags){
+    if(!valid) return 0;
+    if(!meta_ok){
+        *flags |= invalid_flag;
+        g_invalid_packet_count++;
+        return 0;
+    }
+    return 1;
+}
+
+static void _finalize_outputs(CommandFrame *cf, uint32_t watchdog_flags){
+    double amag=sqrt(cf->cmd.accel_lvlh[0]*cf->cmd.accel_lvlh[0]+
+                     cf->cmd.accel_lvlh[1]*cf->cmd.accel_lvlh[1]+
+                     cf->cmd.accel_lvlh[2]*cf->cmd.accel_lvlh[2]);
+    if(amag > GNC_ACCEL_MAX_MS2 && amag > 1e-15){
+        double s=GNC_ACCEL_MAX_MS2/amag;
+        for(int i=0;i<3;i++) cf->cmd.accel_lvlh[i]*=s;
+    }
+    for(int i=0;i<3;i++){
+        cf->cmd.torque_rw[i]=_clampd(cf->cmd.torque_rw[i],
+                                     -TAU_PLANT_MAX_NM, TAU_PLANT_MAX_NM);
+        cf->cmd.dipole_mtq[i]=_clampd(cf->cmd.dipole_mtq[i],
+                                      -GNC_MTQ_MAX_AM2, GNC_MTQ_MAX_AM2);
+    }
+    if(watchdog_flags & GNC_WD_SAFE_FALLBACK){
+        for(int i=0;i<3;i++){
+            cf->cmd.accel_lvlh[i]=0.0;
+            cf->cmd.torque_rw[i]=0.0;
+            cf->cmd.dipole_mtq[i]=0.0;
+            g_accel_lvlh_hold[i]=0.0;
+            g_torque_rw_hold[i]=0.0;
+            g_dipole_mtq_hold[i]=0.0;
+        }
+        cf->cmd.rpod_mode=-1;
+        cf->timing.output_inhibited=1;
+        cf->timing.watchdog_flags |= GNC_WD_OUTPUT_INHIBITED;
+    }else{
+        cf->timing.output_inhibited=0;
+    }
+}
+
 /*
  * _apply_rw_clamped ??? clamp torque to plant physical limit before h_rw
  * integration.  The PhysicsPlantSim clamps applied torque to tau_max=2mN??m.
  * Without this, the C wheel counter diverges from plant reality, triggering
  * spurious momentum dumps before attitude has converged.
  */
-#define TAU_PLANT_MAX_NM  2e-3
-
 static void _apply_rw_clamped(RW_State *rw, const double trw[3], double dt){
     double t[3];
     for(int i=0;i<3;i++){
@@ -390,7 +444,8 @@ void flight_loop_init(double a_chief_m,double e_chief,double mu,double dt_thekf_
     _reset_chief_pose_estimator();
     g_tick=0; g_max_loop_ms=0.0; g_missed=0; g_is_braking=-1; g_rpod_mode_hold=-1; g_docked_latched=0; g_terminal_inflated=0; _reset_rpod_watchdog(); _reset_terminal_guidance();
     g_cmd_frame.timing.deadline_ms=g_deadline_ms;
-    printf("  flight_loop v2: full ADCS stack enabled\n");
+    g_invalid_packet_count=0; g_stale_sensor_count=0; g_gyro_bad_ticks=0;
+    GNC_LOG("  flight_loop v2: full ADCS stack enabled\n");
 }
 
 void flight_loop_seed_thekf(const double x0[6],const double P0_flat[36],double nu0){
@@ -408,9 +463,39 @@ CommandFrame *flight_loop_step(void){
     CommandFrame *cf=&g_cmd_frame;
     double t_sim=(double)g_tick*0.01;
     _clear_rpod_telem(&cf->rpod);
+    cf->timing.watchdog_flags=0;
+    cf->timing.output_inhibited=0;
+    if(sf->sim_tick != g_tick) cf->timing.watchdog_flags |= GNC_WD_FRAME_TICK_MISMATCH;
+
+    int gyro_valid = _packet_is_usable(sf->gyro.valid,
+        PacketMeta_ok(&sf->gyro.meta, GyroPacket_checksum(&sf->gyro), g_tick, GNC_GYRO_MAX_AGE_TICKS),
+        GNC_WD_GYRO_INVALID, &cf->timing.watchdog_flags);
+    int range_valid = _packet_is_usable(sf->range.valid,
+        PacketMeta_ok(&sf->range.meta, RangePacket_checksum(&sf->range), g_tick, GNC_10HZ_MAX_AGE_TICKS),
+        GNC_WD_RANGE_INVALID, &cf->timing.watchdog_flags);
+    int camera_valid = _packet_is_usable(sf->camera.valid,
+        PacketMeta_ok(&sf->camera.meta, CameraPacket_checksum(&sf->camera), g_tick, GNC_10HZ_MAX_AGE_TICKS),
+        GNC_WD_CAMERA_INVALID, &cf->timing.watchdog_flags);
+    int port_valid = _packet_is_usable(sf->port.valid,
+        PacketMeta_ok(&sf->port.meta, PortPacket_checksum(&sf->port), g_tick, GNC_10HZ_MAX_AGE_TICKS),
+        GNC_WD_PORT_INVALID, &cf->timing.watchdog_flags);
+    int mag_valid = _packet_is_usable(sf->mag.valid,
+        PacketMeta_ok(&sf->mag.meta, MagPacket_checksum(&sf->mag), g_tick, GNC_10HZ_MAX_AGE_TICKS),
+        GNC_WD_MAG_INVALID, &cf->timing.watchdog_flags);
+    int sun_valid = _packet_is_usable(sf->sun.valid,
+        PacketMeta_ok(&sf->sun.meta, SunPacket_checksum(&sf->sun), g_tick, GNC_10HZ_MAX_AGE_TICKS),
+        GNC_WD_SUN_INVALID, &cf->timing.watchdog_flags);
+    if(gyro_valid) g_gyro_bad_ticks=0;
+    else {
+        g_gyro_bad_ticks++;
+        g_stale_sensor_count++;
+        if(g_gyro_bad_ticks >= GNC_GYRO_SAFE_TICKS){
+            cf->timing.watchdog_flags |= GNC_WD_SAFE_FALLBACK;
+        }
+    }
 
     /* ?????? 100 Hz: Gyro + MEKF predict ???????????????????????????????????????????????????????????????????????????????????? */
-    if(sf->gyro.valid){
+    if(gyro_valid){
         MEKF_FLOAT w[3]={(MEKF_FLOAT)sf->gyro.omega_xyz[0],
                          (MEKF_FLOAT)sf->gyro.omega_xyz[1],
                          (MEKF_FLOAT)sf->gyro.omega_xyz[2]};
@@ -424,9 +509,9 @@ CommandFrame *flight_loop_step(void){
     cf->att.pointing_err_deg=_pointing_err_deg(cf->att.q_wxyz);
 
     double omega_est[3]={
-        sf->gyro.valid?sf->gyro.omega_xyz[0]-(double)g_mekf.bias[0]:0.0,
-        sf->gyro.valid?sf->gyro.omega_xyz[1]-(double)g_mekf.bias[1]:0.0,
-        sf->gyro.valid?sf->gyro.omega_xyz[2]-(double)g_mekf.bias[2]:0.0
+        gyro_valid?sf->gyro.omega_xyz[0]-(double)g_mekf.bias[0]:0.0,
+        gyro_valid?sf->gyro.omega_xyz[1]-(double)g_mekf.bias[1]:0.0,
+        gyro_valid?sf->gyro.omega_xyz[2]-(double)g_mekf.bias[2]:0.0
     };
 
     /* ?????? Mode manager update ??????????????????????????????????????????????????????????????????????????????????????????????????????????????? */
@@ -472,7 +557,7 @@ CommandFrame *flight_loop_step(void){
         g_torque_rw_hold[0]=g_torque_rw_hold[1]=g_torque_rw_hold[2]=0.0;
         cf->cmd.rpod_mode=-1;
         cf->cmd.accel_lvlh[0]=cf->cmd.accel_lvlh[1]=cf->cmd.accel_lvlh[2]=0.0;
-        if(sf->mag.valid){
+        if(mag_valid){
             double m[3],tau[3];
             BDOT_compute(&g_bdot,sf->mag.body,omega_est,m,tau);
             g_dipole_mtq_hold[0]=m[0]; g_dipole_mtq_hold[1]=m[1]; g_dipole_mtq_hold[2]=m[2];
@@ -491,7 +576,7 @@ CommandFrame *flight_loop_step(void){
         cf->cmd.rpod_mode=-1;
         cf->cmd.accel_lvlh[0]=cf->cmd.accel_lvlh[1]=cf->cmd.accel_lvlh[2]=0.0;
         /* QUEST attitude init */
-        if(sf->mag.valid && sf->sun.valid){
+        if(mag_valid && sun_valid){
             QUEST_Result qr=QUEST_compute(sf->mag.body,sf->mag.inertial,
                                            sf->sun.body,sf->sun.inertial,0.9,0.1);
             cf->att.quest_quality=qr.quality;
@@ -531,7 +616,7 @@ CommandFrame *flight_loop_step(void){
         _reset_terminal_guidance();
         cf->cmd.rpod_mode=-1;
         cf->cmd.accel_lvlh[0]=cf->cmd.accel_lvlh[1]=cf->cmd.accel_lvlh[2]=0.0;
-        if(sf->mag.valid){
+        if(mag_valid){
             double m[3],tau[3];
             MTQ_compute_dipole(&g_mtq,g_rw.h,sf->mag.body,m);
             MTQ_compute_torque(m,sf->mag.body,tau);
@@ -551,21 +636,21 @@ CommandFrame *flight_loop_step(void){
     cf->ekf_updated=0;
     if(g_tick%10==0){
         THEKF_predict(&g_thekf,g_accel_lvlh_hold);
-        if(sf->range.valid){
+        if(range_valid){
             double z[3]={sf->range.range_m,sf->range.azimuth_rad,sf->range.elevation_rad};
             double R[3][3]={{0.09,0,0},{0,3e-6,0},{0,0,3e-6}};
             cf->ekf_updated=(uint8_t)THEKF_update(&g_thekf,z,R,5.0);
         }
-        if(sf->camera.valid){
+        if(camera_valid){
             double Rc[3][3]={{sf->camera.R_diag[0],0,0},{0,sf->camera.R_diag[1],0},{0,0,sf->camera.R_diag[2]}};
             cf->ekf_updated|=(uint8_t)THEKF_update_position(&g_thekf,sf->camera.pos_lvlh,Rc,5.0);
         }
-        if(sf->mag.valid){
+        if(mag_valid){
             MEKF_FLOAT zb[3]={(MEKF_FLOAT)sf->mag.body[0],(MEKF_FLOAT)sf->mag.body[1],(MEKF_FLOAT)sf->mag.body[2]};
             MEKF_FLOAT vi[3]={(MEKF_FLOAT)sf->mag.inertial[0],(MEKF_FLOAT)sf->mag.inertial[1],(MEKF_FLOAT)sf->mag.inertial[2]};
             MEKF_update(&g_mekf,zb,vi,g_mekf.R_mag);
         }
-        if(sf->sun.valid){
+        if(sun_valid){
             MEKF_FLOAT zb[3]={(MEKF_FLOAT)sf->sun.body[0],(MEKF_FLOAT)sf->sun.body[1],(MEKF_FLOAT)sf->sun.body[2]};
             MEKF_FLOAT vi[3]={(MEKF_FLOAT)sf->sun.inertial[0],(MEKF_FLOAT)sf->sun.inertial[1],(MEKF_FLOAT)sf->sun.inertial[2]};
             MEKF_update(&g_mekf,zb,vi,g_mekf.R_sun);
@@ -604,7 +689,7 @@ CommandFrame *flight_loop_step(void){
                 RPOD_TermState ts;
                 double guided_pos[3], guided_vel[3], tracked_port[3];
                 TNF_update(&g_terminal_nav, g_rpod_state.pos, g_rpod_state.vel,
-                                 sf->camera.valid ? 1 : 0, 0.1,
+                                 camera_valid ? 1 : 0, 0.1,
                                  guided_pos, guided_vel);
                 ts.pos[0]=guided_pos[0]; ts.pos[1]=guided_pos[1]; ts.pos[2]=guided_pos[2];
                 ts.vel[0]=guided_vel[0]; ts.vel[1]=guided_vel[1]; ts.vel[2]=guided_vel[2];
@@ -619,13 +704,13 @@ CommandFrame *flight_loop_step(void){
                 ts.body_clear=1;
                 ts.capture_core=0;
                 ts.has_port=PT_update(&g_port_tracker, sf->port.port_lvlh,
-                                                  sf->port.valid ? 1 : 0,
+                                                  port_valid ? 1 : 0,
                                                   0.1, tracked_port);
                 if(ts.has_port){
                     ts.port_lvlh[0]=tracked_port[0];
                     ts.port_lvlh[1]=tracked_port[1];
                     ts.port_lvlh[2]=tracked_port[2];
-                    if(sf->port.valid){
+                    if(port_valid){
                         ts.port_axis_lvlh[0]=sf->port.port_axis_lvlh[0];
                         ts.port_axis_lvlh[1]=sf->port.port_axis_lvlh[1];
                         ts.port_axis_lvlh[2]=sf->port.port_axis_lvlh[2];
@@ -680,7 +765,7 @@ CommandFrame *flight_loop_step(void){
                 cf->rpod.spin_sync_rate_cmd[1] = g_spin_sync_omega_body[1];
                 cf->rpod.spin_sync_rate_cmd[2] = g_spin_sync_omega_body[2];
 
-                if(!sf->camera.valid){
+                if(!camera_valid){
                     if(g_terminal_cam_lost_s < 0.0) g_terminal_cam_lost_s = t_sim;
                     if((t_sim - g_terminal_cam_lost_s) >= 2.0) g_lost_target_active = 1;
                 }else{
@@ -753,6 +838,9 @@ CommandFrame *flight_loop_step(void){
     cf->timing.max_loop_time_ms=g_max_loop_ms;
     cf->timing.missed_deadlines=g_missed;
     cf->timing.deadline_ms=g_deadline_ms;
+    cf->timing.invalid_packet_count=g_invalid_packet_count;
+    cf->timing.stale_sensor_count=g_stale_sensor_count;
+    _finalize_outputs(cf, cf->timing.watchdog_flags);
     g_tick++;
     return cf;
 }
@@ -785,8 +873,41 @@ void flight_loop_get_thekf_state(double x_out[6],double P_out[36]){
 }
 
 #ifdef FLIGHT_LOOP_STANDALONE
+static void _standalone_stamp_packets(SensorFrame *sf){
+    if(sf->gyro.valid){
+        sf->gyro.meta.version=SENSOR_PACKET_VERSION;
+        sf->gyro.meta.timestamp_tick=sf->sim_tick;
+        sf->gyro.meta.checksum=GyroPacket_checksum(&sf->gyro);
+    }
+    if(sf->range.valid){
+        sf->range.meta.version=SENSOR_PACKET_VERSION;
+        sf->range.meta.timestamp_tick=sf->sim_tick;
+        sf->range.meta.checksum=RangePacket_checksum(&sf->range);
+    }
+    if(sf->camera.valid){
+        sf->camera.meta.version=SENSOR_PACKET_VERSION;
+        sf->camera.meta.timestamp_tick=sf->sim_tick;
+        sf->camera.meta.checksum=CameraPacket_checksum(&sf->camera);
+    }
+    if(sf->port.valid){
+        sf->port.meta.version=SENSOR_PACKET_VERSION;
+        sf->port.meta.timestamp_tick=sf->sim_tick;
+        sf->port.meta.checksum=PortPacket_checksum(&sf->port);
+    }
+    if(sf->mag.valid){
+        sf->mag.meta.version=SENSOR_PACKET_VERSION;
+        sf->mag.meta.timestamp_tick=sf->sim_tick;
+        sf->mag.meta.checksum=MagPacket_checksum(&sf->mag);
+    }
+    if(sf->sun.valid){
+        sf->sun.meta.version=SENSOR_PACKET_VERSION;
+        sf->sun.meta.timestamp_tick=sf->sim_tick;
+        sf->sun.meta.checksum=SunPacket_checksum(&sf->sun);
+    }
+}
+
 int main(void){
-    printf("Flight loop v2 standalone smoke test\n");
+    GNC_LOG("Flight loop v2 standalone smoke test\n");
     flight_loop_init(42164e3,0.001,3.986004418e14,0.1);
     double x0[6]={0.,500.,0.,0.,1e-3,0.};
     double P0[36]={0}; for(int i=0;i<6;i++) P0[i*6+i]=(i<3)?2500.0:0.25;
@@ -805,14 +926,14 @@ int main(void){
             sf->sun.body[0]=0.577;sf->sun.body[1]=0.577;sf->sun.body[2]=0.577;
             sf->sun.inertial[0]=0.577;sf->sun.inertial[1]=0.577;sf->sun.inertial[2]=0.577;sf->sun.valid=1;
         }
-        sf->sim_tick=i; cf=flight_loop_step();
+        sf->sim_tick=i; _standalone_stamp_packets(sf); cf=flight_loop_step();
     }
     double el=_get_time_ms()-t0;
-    printf("  Tick 299: fsw_mode=%d range=%.1fm loop=%.3fms max=%.3fms missed=%u\n",
+    GNC_LOG("  Tick 299: fsw_mode=%d range=%.1fm loop=%.3fms max=%.3fms missed=%u\n",
         cf->cmd.fsw_mode,cf->nav.range_m,cf->timing.loop_time_ms,
         cf->timing.max_loop_time_ms,cf->timing.missed_deadlines);
-    printf("  300 ticks in %.2fms (avg %.3fms/tick)\n",el,el/300.0);
-    printf("  PASS\n");
+    GNC_LOG("  300 ticks in %.2fms (avg %.3fms/tick)\n",el,el/300.0);
+    GNC_LOG("  PASS\n");
     return 0;
 }
 #endif

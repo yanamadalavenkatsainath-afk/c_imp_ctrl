@@ -35,12 +35,21 @@ PORT_SENSOR_RANGE_M = 10.0
 PORT_SENSOR_SIGMA_M = 0.02
 
 # -- ctypes struct mirrors of C headers ---------------------------
+SENSOR_PACKET_VERSION = 2
+
+class PacketMeta(ctypes.Structure):
+    _fields_ = [
+        ("version",        ctypes.c_uint32),
+        ("checksum",       ctypes.c_uint32),
+        ("timestamp_tick", ctypes.c_uint64),
+    ]
 
 class GyroPacket(ctypes.Structure):
     _fields_ = [
         ("omega_xyz", ctypes.c_double * 3),
         ("valid",     ctypes.c_uint8),
         ("_pad",      ctypes.c_uint8 * 7),
+        ("meta",      PacketMeta),
     ]
 
 class RangePacket(ctypes.Structure):
@@ -50,6 +59,7 @@ class RangePacket(ctypes.Structure):
         ("elevation_rad", ctypes.c_double),
         ("valid",         ctypes.c_uint8),
         ("_pad",          ctypes.c_uint8 * 7),
+        ("meta",          PacketMeta),
     ]
 
 class CameraPacket(ctypes.Structure):
@@ -58,6 +68,7 @@ class CameraPacket(ctypes.Structure):
         ("R_diag",   ctypes.c_double * 3),
         ("valid",    ctypes.c_uint8),
         ("_pad",     ctypes.c_uint8 * 7),
+        ("meta",     PacketMeta),
     ]
 
 class PortPacket(ctypes.Structure):
@@ -69,6 +80,7 @@ class PortPacket(ctypes.Structure):
         ("R_diag",    ctypes.c_double * 3),
         ("valid",     ctypes.c_uint8),
         ("_pad",      ctypes.c_uint8 * 7),
+        ("meta",      PacketMeta),
     ]
 
 class MagPacket(ctypes.Structure):
@@ -77,6 +89,7 @@ class MagPacket(ctypes.Structure):
         ("inertial", ctypes.c_double * 3),
         ("valid",    ctypes.c_uint8),
         ("_pad",     ctypes.c_uint8 * 7),
+        ("meta",     PacketMeta),
     ]
 
 class SunPacket(ctypes.Structure):
@@ -85,6 +98,7 @@ class SunPacket(ctypes.Structure):
         ("inertial", ctypes.c_double * 3),
         ("valid",    ctypes.c_uint8),
         ("_pad",     ctypes.c_uint8 * 7),
+        ("meta",     PacketMeta),
     ]
 
 class SensorFrame(ctypes.Structure):
@@ -132,6 +146,10 @@ class TimingTelemetry(ctypes.Structure):
         ("max_loop_time_ms",  ctypes.c_double),
         ("missed_deadlines",  ctypes.c_uint32),
         ("deadline_ms",       ctypes.c_double),
+        ("watchdog_flags",    ctypes.c_uint32),
+        ("invalid_packet_count", ctypes.c_uint32),
+        ("stale_sensor_count", ctypes.c_uint32),
+        ("output_inhibited",  ctypes.c_uint32),
     ]
 
 class RPODTelemetry(ctypes.Structure):
@@ -165,6 +183,26 @@ class CommandFrame(ctypes.Structure):
         ("_pad",        ctypes.c_uint8 * 7),
     ]
 
+def _fnv1a32(data: bytes) -> int:
+    h = 2166136261
+    for b in data:
+        h ^= b
+        h = (h * 16777619) & 0xFFFFFFFF
+    return h
+
+def stamp_packet(packet, tick: int) -> None:
+    packet.meta.version = SENSOR_PACKET_VERSION
+    packet.meta.timestamp_tick = int(tick)
+    packet.meta.checksum = 0
+    payload = ctypes.string_at(ctypes.addressof(packet), type(packet).meta.offset)
+    packet.meta.checksum = _fnv1a32(payload)
+
+def stamp_frame_valid_packets(sf: SensorFrame) -> None:
+    tick = int(sf.sim_tick)
+    for packet in (sf.gyro, sf.range, sf.camera, sf.port, sf.mag, sf.sun):
+        if packet.valid:
+            stamp_packet(packet, tick)
+
 def _quat_to_rot(q: np.ndarray) -> np.ndarray:
     w, x, y, z = q
     return np.array([
@@ -195,10 +233,23 @@ class TelRow:
     accel_cmd:     np.ndarray
     fsw_mode: int
     loop_time_ms:  float
+    max_loop_time_ms: float
+    missed_deadlines: int
+    range_m: float
     ekf_updated:   bool
     range_valid:   bool
     camera_valid:  bool
+    port_valid:    bool
     gyro_valid:    bool
+    rpod_mode:     int
+    att_bias:      np.ndarray
+    port_range_m:  float
+    port_vrel_ms:  float
+    align_deg:     float
+    phase_elapsed_s: float
+    pose_age_s:    float
+    pose_valid:    bool
+    spin_sync_active: bool
 
 # -- DLL wrapper --------------------------------------------------
 class FlightLoopDLL:
@@ -414,15 +465,18 @@ class FakeSensorSim:
                 sf.mag.inertial[i] = v_inertial[i]
             sf.mag.valid = 1
 
-        sf.sim_tick   = self.tick
+        sf.sim_tick   = max(0, self.tick - 1)
         sf.sim_time_s = self.t
+        stamp_frame_valid_packets(sf)
         return sf
 
 
 # -- Main SIL driver -----------------------------------------------
 def run_sil(n_ticks: int = 3600,
             scenario: str = "nominal",
-            verbose: bool = True) -> List[TelRow]:
+            verbose: bool = True,
+            rng_seed: int = 42,
+            x0_override: Optional[np.ndarray] = None) -> List[TelRow]:
     """
     Run n_ticks (100 Hz ticks = n_ticks/100 seconds) of SIL.
     Returns list of TelRow for post-processing.
@@ -432,6 +486,13 @@ def run_sil(n_ticks: int = 3600,
       "range_dropout"  -- range drops out at tick 1000-1200
       "camera_spike"   -- camera sends bad spike at tick 500
       "gyro_bias"      -- gyro bias jumps at tick 800
+      "gyro_dropout"   -- gyro packet drops out at tick 800-1000
+      "lidar_dropout"  -- close-range port/lidar packet drops out
+      "stale_port"     -- port/lidar packet freezes while still marked valid
+      "frozen_packets" -- 10 Hz sensor packets freeze while gyro remains live
+      "delayed_packets"-- 10 Hz packets are delayed by 0.2s
+      "bad_timestamps" -- sensor frame tick/time are corrupted
+      "actuator_saturation" -- starts with an aggressive relative velocity
     """
     MU    = 3.986004418e14
     A_GEO = 42164e3
@@ -442,19 +503,25 @@ def run_sil(n_ticks: int = 3600,
     dll.init(A_GEO, E_GEO, MU, 0.1)   # TH-EKF at 10 Hz
 
     x0  = np.array([0., 500., 0., 0., 1e-3, 0.])
+    if x0_override is not None:
+        x0 = np.asarray(x0_override, dtype=float).copy()
     P0  = np.diag([50.**2]*3 + [0.5**2]*3)
     dll.seed_thekf(x0, P0, 0.0)
 
-    sim  = FakeSensorSim(x0, N, dt=0.01)
+    sim  = FakeSensorSim(x0, N, dt=0.01, rng_seed=rng_seed)
     log: List[TelRow] = []
 
     last_accel = np.zeros(3)
     t0_wall    = time.perf_counter()
+    saved_port_frame: Optional[SensorFrame] = None
+    frozen_frame: Optional[SensorFrame] = None
+    delay_line: list[SensorFrame] = []
 
     if verbose:
         print(f"\n{'='*60}")
         print(f"  SIL Real-Time Driver  --  scenario: {scenario}")
         print(f"  {n_ticks} ticks @ 100 Hz = {n_ticks/100:.1f}s sim time")
+        print(f"  rng_seed={rng_seed}")
         print(f"{'='*60}")
 
     for tick in range(n_ticks):
@@ -469,6 +536,8 @@ def run_sil(n_ticks: int = 3600,
             sim.camera_dropout = False   # allow camera but inject spike below
         elif scenario == "gyro_bias" and tick >= 800:
             pass  # handled in sensor frame overwrite below
+        elif scenario == "gyro_dropout" and 800 <= tick < 1000:
+            sim.gyro_dropout = True
 
         # -- Generate fake sensor frame -------------
         sf_py = sim.generate_frame(last_accel)
@@ -477,15 +546,85 @@ def run_sil(n_ticks: int = 3600,
         if scenario == "gyro_bias" and tick >= 800:
             for i in range(3):
                 sf_py.gyro.omega_xyz[i] += 0.005   # 5 mrad/s step bias
+            if sf_py.gyro.valid:
+                stamp_packet(sf_py.gyro, sf_py.sim_tick)
+
+        if scenario == "gyro_dropout" and 800 <= tick < 1000:
+            sf_py.gyro.valid = 0
 
         # Camera spike injection
         if scenario == "camera_spike" and tick == 500:
             sf_py.camera.valid = 1
             sf_py.camera.pos_lvlh[0] = 9999.0   # blatant spike
+            stamp_packet(sf_py.camera, sf_py.sim_tick)
+
+        # Close-range lidar/port packet faults.  These are active only once
+        # the synthetic deputy is close enough for the port sensor to be in
+        # range, otherwise the case would be indistinguishable from nominal.
+        if scenario == "lidar_dropout" and 1200 <= tick < 1800:
+            sf_py.port.valid = 0
+
+        if sf_py.port.valid:
+            saved_port_frame = SensorFrame()
+            ctypes.memmove(ctypes.addressof(saved_port_frame),
+                           ctypes.addressof(sf_py),
+                           ctypes.sizeof(SensorFrame))
+
+        if scenario == "stale_port" and 1200 <= tick < 1800 and saved_port_frame is not None:
+            for i in range(3):
+                sf_py.port.port_lvlh[i] = saved_port_frame.port.port_lvlh[i]
+                sf_py.port.port_axis_lvlh[i] = saved_port_frame.port.port_axis_lvlh[i]
+                sf_py.port.port_vel_lvlh[i] = saved_port_frame.port.port_vel_lvlh[i]
+                sf_py.port.R_diag[i] = saved_port_frame.port.R_diag[i]
+                for j in range(3):
+                    sf_py.port.R_body_to_lvlh[i][j] = saved_port_frame.port.R_body_to_lvlh[i][j]
+            sf_py.port.valid = saved_port_frame.port.valid
+
+        if scenario == "frozen_packets" and 1000 <= tick < 1300:
+            if frozen_frame is None:
+                frozen_frame = SensorFrame()
+                ctypes.memmove(ctypes.addressof(frozen_frame),
+                               ctypes.addressof(sf_py),
+                               ctypes.sizeof(SensorFrame))
+            gyro = sf_py.gyro
+            sim_tick = sf_py.sim_tick
+            sim_time_s = sf_py.sim_time_s
+            ctypes.memmove(ctypes.addressof(sf_py),
+                           ctypes.addressof(frozen_frame),
+                           ctypes.sizeof(SensorFrame))
+            sf_py.gyro = gyro
+            sf_py.sim_tick = sim_tick
+            sf_py.sim_time_s = sim_time_s
+        elif scenario == "frozen_packets":
+            frozen_frame = None
+
+        if scenario == "delayed_packets":
+            old = SensorFrame()
+            ctypes.memmove(ctypes.addressof(old),
+                           ctypes.addressof(sf_py),
+                           ctypes.sizeof(SensorFrame))
+            delay_line.append(old)
+            if len(delay_line) > 20:
+                delayed = delay_line.pop(0)
+                gyro = sf_py.gyro
+                sim_tick = sf_py.sim_tick
+                sim_time_s = sf_py.sim_time_s
+                sf_py.range = delayed.range
+                sf_py.camera = delayed.camera
+                sf_py.port = delayed.port
+                sf_py.mag = delayed.mag
+                sf_py.sun = delayed.sun
+                sf_py.gyro = gyro
+                sf_py.sim_tick = sim_tick
+                sf_py.sim_time_s = sim_time_s
+
+        if scenario == "bad_timestamps" and 1000 <= tick < 1300:
+            sf_py.sim_tick = 0
+            sf_py.sim_time_s = -123.0
 
         # -- Copy into DLL sensor frame -------------
         dll_sf = dll.get_sensor_frame()
-        ctypes.memmove(dll_sf.contents, ctypes.addressof(sf_py),  # type: ignore[arg-type]
+        ctypes.memmove(dll_sf, ctypes.addressof(sf_py),  # type: ignore[arg-type]
                        ctypes.sizeof(SensorFrame))
 
         # -- Step C flight loop ---------------------
@@ -506,10 +645,23 @@ def run_sil(n_ticks: int = 3600,
                 accel_cmd     = last_accel.copy(),
                 fsw_mode = cf.cmd.fsw_mode,
                 loop_time_ms  = cf.timing.loop_time_ms,
+                max_loop_time_ms = cf.timing.max_loop_time_ms,
+                missed_deadlines = int(cf.timing.missed_deadlines),
+                range_m       = cf.nav.range_m,
                 ekf_updated   = bool(cf.ekf_updated),
                 range_valid   = bool(sf_py.range.valid),
                 camera_valid  = bool(sf_py.camera.valid),
+                port_valid    = bool(sf_py.port.valid),
                 gyro_valid    = bool(sf_py.gyro.valid),
+                rpod_mode     = cf.cmd.rpod_mode,
+                att_bias      = np.array(list(cf.att.bias_xyz)),
+                port_range_m  = cf.rpod.port_range_m,
+                port_vrel_ms  = cf.rpod.port_vrel_ms,
+                align_deg     = cf.rpod.attitude_align_deg,
+                phase_elapsed_s = cf.rpod.phase_elapsed_s,
+                pose_age_s    = cf.rpod.pose_age_s,
+                pose_valid    = bool(cf.rpod.pose_valid),
+                spin_sync_active = bool(cf.rpod.spin_sync_active),
             )
             log.append(row)
 
@@ -548,7 +700,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", default="nominal",
                         choices=["nominal", "range_dropout",
-                                 "camera_spike", "gyro_bias"])
+                                 "camera_spike", "gyro_bias",
+                                 "gyro_dropout", "lidar_dropout",
+                                 "stale_port", "frozen_packets",
+                                 "delayed_packets", "bad_timestamps",
+                                 "actuator_saturation"])
     parser.add_argument("--ticks", type=int, default=3600)
     args = parser.parse_args()
 

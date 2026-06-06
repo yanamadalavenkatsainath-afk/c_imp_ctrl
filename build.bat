@@ -188,6 +188,16 @@ python sim_python/verify_realtime_sil.py
 if %errorlevel% neq 0 ( echo REALTIME SIL FAILED & exit /b 1 )
 
 echo.
+echo === Running SIL maturity fault matrix ===
+python sim_python/sil_maturity_suite.py
+if %errorlevel% neq 0 ( echo SIL MATURITY MATRIX FAILED & exit /b 1 )
+
+echo.
+echo === Running SIL long-duration soak ===
+python sim_python/sil_soak.py
+if %errorlevel% neq 0 ( echo SIL SOAK FAILED & exit /b 1 )
+
+echo.
 echo === Running Closed-Loop SIL verification ===
 python sim_python/closed_loop_sil.py
 if %errorlevel% neq 0 ( echo CLOSED LOOP SIL FAILED & exit /b 1 )
