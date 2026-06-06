@@ -15,7 +15,7 @@
  *     - Port targeting: drives to port_lvlh, not just CoM.
  *     - EKF spike guard: if port_lvlh > PORT_SANITY_M from deputy, fall
  *       back to CoM (origin).
- *     - TAU gain scheduling: 2s (far), 3s (mid), 5s (close).
+ *     - TAU gain scheduling: 6s (far), 8s (mid), 10s (close).
  *     - Entry brake: decelerates to BRAKE_DONE_MS if entering fast.
  *     - Speed law: sqrt on com_range, capped at V_TERM_MAX_MS.
  *     - Capture: creep at V_CAPTURE_MS until docked.
@@ -34,6 +34,8 @@
 #ifndef RPOD_CTRL_H
 #define RPOD_CTRL_H
 
+#include "sim_config.h"
+
 /* ── PROX_OPS constants ─────────────────────────────────────────
  * sqrt closing-speed law:  v_close = K_SQRT * sqrt(range)
  *   K_SQRT = V_CLOSE_MAX_MS / sqrt(FAR_FIELD_M) = 0.200/sqrt(500)
@@ -41,27 +43,30 @@
  *   V_CLOSE_MAX_MS  = 200mm/s  (global cap)
  *   V_CLOSE_NEAR_MS =   5mm/s  (< 10m)
  */
-#define RPOD_FAR_FIELD_M        500.0   /* Lambert → PROX_OPS handoff [m]  */
-#define RPOD_TERMINAL_M           5.0   /* PROX_OPS -> TERMINAL handoff [m] */
-#define RPOD_PROX_TAU             5.0   /* velocity-error time constant [s] */
+#define RPOD_FAR_FIELD_M        CFG_PROX_FAR_FIELD_M
+#define RPOD_TERMINAL_M         CFG_MAIN_TERMINAL_M
+#define RPOD_PROX_TAU           CFG_PROX_TAU_S
 
-#define RPOD_V_CLOSE_MAX_MS    0.200    /* max closing speed [m/s]          */
-#define RPOD_V_CLOSE_NEAR_MS   0.005    /* closing speed cap below 10m [m/s]*/
-#define RPOD_V_CLOSE_NEAR_RNG  10.0    /* range below which near-cap applies [m] */
+#define RPOD_V_CLOSE_MAX_MS     CFG_PROX_V_CLOSE_MAX_MS
+#define RPOD_V_CLOSE_NEAR_MS    CFG_PROX_V_CLOSE_NEAR_MS
+#define RPOD_V_CLOSE_NEAR_RNG   CFG_PROX_V_CLOSE_NEAR_RANGE_M
 /* K_SQRT = 0.200 / sqrt(500) ≈ 0.008944  [m/s / sqrt(m)] */
 #define RPOD_K_SQRT             0.008944272
 
 /* ── TERMINAL constants ──────────────────────────────────────── */
-#define RPOD_V_TERM_MAX_MS     0.025    /* max speed in TERMINAL [m/s]      */
+#define RPOD_V_TERM_MAX_MS     CFG_TERMINAL_V_MAX_MS
 #define RPOD_V_APPROACH_MS     0.010    /* speed below approach band [m/s]  */
-#define RPOD_V_CAPTURE_MS      0.005    /* speed inside capture zone [m/s]  */
-#define RPOD_DOCK_RANGE_M      0.30     /* soft-capture port gate [m]       */
+#define RPOD_V_CAPTURE_MS      CFG_TERMINAL_V_CAPTURE_MS
+#define RPOD_DOCK_RANGE_M      CFG_DOCK_RANGE_M
 #define RPOD_DOCK_DONE_M       0.20     /* legacy alias for capture gate    */
-#define RPOD_DOCK_MAX_SPEED_MS 0.050    /* max port-relative dock speed     */
-#define RPOD_PORT_SANITY_M     2.0      /* EKF spike guard: max port dist   */
-#define RPOD_APPROACH_M        0.80     /* terminal approach speed band [m] */
-#define RPOD_BRAKE_DONE_MS     0.010    /* entry brake target speed [m/s]   */
-#define RPOD_BRAKE_ENTRY_MS    0.015    /* brake if entry speed > this [m/s]*/
+#define RPOD_DOCK_MAX_SPEED_MS CFG_DOCK_VREL_MS
+#define RPOD_PORT_SANITY_M     CFG_TERMINAL_PORT_SANITY_M
+#define RPOD_APPROACH_M        CFG_TERMINAL_SQRT_NORM_RANGE_M
+#define RPOD_BRAKE_DONE_MS     CFG_TERMINAL_BRAKE_DONE_MS
+#define RPOD_BRAKE_ENTRY_MS    CFG_TERMINAL_BRAKE_ENTRY_MS
+#define RPOD_SOFT_CAPTURE_ENTRY_ALIGN_MAX_DEG CFG_SOFT_CAPTURE_ENTRY_ALIGN_MAX_DEG
+#define RPOD_SOFT_CAPTURE_LATCH_VREL_MS      CFG_SOFT_CAPTURE_LATCH_VREL_MS
+#define RPOD_SOFT_CAPTURE_CORE_ALIGN_MAX_DEG CFG_SOFT_CAPTURE_CORE_ALIGN_MAX_DEG
 
 #define RPOD_RET_LOST_TARGET          -1
 #define RPOD_RET_NORMAL                0
@@ -70,24 +75,26 @@
 #define RPOD_RET_SOFT_CAPTURE_READY    3
 
 /* Python terminal/capture parity constants */
-#define RPOD_HARD_CAPTURE_RANGE_M      0.08
-#define RPOD_HARD_CAPTURE_VREL_MS      0.010
-#define RPOD_HARD_CAPTURE_HOLD_S       5.0
-#define RPOD_DOCK_ALIGN_MAX_DEG        10.0
-#define RPOD_DOCK_CONE_HALF_ANGLE_DEG  15.0
-#define RPOD_DOCK_PORT_APERTURE_M      0.15
-#define RPOD_DOCK_CONE_MIN_RANGE_M     0.05
-#define RPOD_DOCK_FACE_TOL_M           0.05
+#define RPOD_HARD_CAPTURE_RANGE_M      CFG_HARD_CAPTURE_RANGE_M
+#define RPOD_HARD_CAPTURE_VREL_MS      CFG_HARD_CAPTURE_VREL_MS
+#define RPOD_HARD_CAPTURE_HOLD_S       CFG_HARD_CAPTURE_HOLD_S
+#define RPOD_HARD_CAPTURE_GRACE_S      CFG_HARD_CAPTURE_GRACE_S
+#define RPOD_SOFT_CAPTURE_MAX_HOLD_S   CFG_SOFT_CAPTURE_MAX_HOLD_S
+#define RPOD_DOCK_ALIGN_MAX_DEG        CFG_DOCK_ALIGN_MAX_DEG
+#define RPOD_DOCK_CONE_HALF_ANGLE_DEG  CFG_DOCK_CONE_HALF_ANGLE_DEG
+#define RPOD_DOCK_PORT_APERTURE_M      CFG_DOCK_PORT_APERTURE_M
+#define RPOD_DOCK_CONE_MIN_RANGE_M     CFG_DOCK_CONE_MIN_RANGE_M
+#define RPOD_DOCK_FACE_TOL_M           CFG_DOCK_FACE_TOL_M
 #define RPOD_SOFT_CAPTURE_KP           0.010
 #define RPOD_SOFT_CAPTURE_KD           0.250
 
 /* TAU gain scheduling thresholds */
-#define RPOD_TAU_CLOSE         8.0      /* TAU [s] for com_range < 0.30m   */
-#define RPOD_TAU_MID           5.0      /* TAU [s] for 0.30m-0.60m         */
-#define RPOD_TAU_FAR           3.0      /* TAU [s] for com_range >= 0.60m  */
+#define RPOD_TAU_CLOSE        CFG_TERMINAL_TAU_CLOSE_S
+#define RPOD_TAU_MID          CFG_TERMINAL_TAU_MID_S
+#define RPOD_TAU_FAR          CFG_TERMINAL_TAU_FAR_S
 
-/* Terminal sqrt-law gain: V_TERM_MAX_MS / sqrt(TERMINAL_M) */
-#define RPOD_K_SQRT_TERM       0.01118034 /* = 0.025 / sqrt(5.0) */
+/* Terminal sqrt-law gain: V_TERM_MAX_MS / sqrt(0.8m), matching Python. */
+#define RPOD_K_SQRT_TERM       0.02795085 /* = 0.025 / sqrt(0.8) */
 
 /* ── TERMINAL sqrt-law gain (for test_rpod.c compatibility) ─── */
 /* K_SQRT_TERM defined above as RPOD_K_SQRT_TERM.
@@ -113,6 +120,7 @@ typedef struct {
  * port_lvlh[3]:      docking port position in LVLH [m].
  * port_axis_lvlh[3]: outward docking axis in LVLH, reserved for alignment gates.
  * port_vel_lvlh[3]:  docking port velocity in LVLH [m/s].
+ * R_body_to_lvlh:    optional chief body-to-LVLH rotation for exact body-clear.
  * has_port:          1 if port fields are valid, 0 to use CoM.
  */
 typedef struct {
@@ -121,14 +129,18 @@ typedef struct {
     double port_lvlh[3];
     double port_axis_lvlh[3];
     double port_vel_lvlh[3];
+    double R_body_to_lvlh[3][3];
     double attitude_align_deg;
     double cone_angle_deg;
     double cone_error_deg;
     double lateral_m;
     int    has_port;
+    int    has_body_R;
     int    has_attitude_align;
     int    has_geometry;
     int    geometry_ok;
+    int    body_clear;
+    int    capture_core;
 } RPOD_TermState;
 
 /**

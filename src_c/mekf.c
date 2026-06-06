@@ -158,13 +158,12 @@ void MEKF_init(MEKF_State *s, float dt_s) {
     s->q[0] = 1.0f;
 
     /*
-     * P — initial covariance.
-     * Attitude rows (0-2): (0.1 rad)² ≈ 0.01 rad²  (~5.7°)
-     * Bias rows    (3-5): (0.01 rad/s)² = 1e-4 rad²/s²
-     * These match Python MEKF.__init__() exactly.
+     * P — initial covariance (matches Python MEKF.__init__() exactly).
+     * Attitude rows (0-2): (0.1°)² = (np.radians(0.1))² ≈ 3.046e-6 rad²
+     * Bias rows    (3-5): (0.5 deg/hr)² = (np.radians(0.5)/3600)² ≈ 5.876e-12 rad²/s²
      */
-    for (int i=0;i<6;i++) s->P[i][i] = 0.01f;
-    s->P[3][3]=1e-4f; s->P[4][4]=1e-4f; s->P[5][5]=1e-4f;
+    for (int i=0;i<6;i++) s->P[i][i] = 3.046e-6f;
+    s->P[3][3]=5.876e-12f; s->P[4][4]=5.876e-12f; s->P[5][5]=5.876e-12f;
 
     /*
      * P4 FIX — Q discrete-time scaling.
@@ -184,17 +183,23 @@ void MEKF_init(MEKF_State *s, float dt_s) {
      * Q_att  = 5e-8  rad²/step  — Sensonor STIM300 ARW²×dt
      * Q_bias = 1e-12 rad²/s²/step — RRW²×dt  (matches Python exactly)
      *
-     * NOTE: test_mekf.c test 3 (bias convergence in 500 steps) uses
-     * a larger injected bias (1 mrad/s components). Bias state converges
-     * because P_bias_init = 1e-4 is large enough for the gain to act,
-     * independent of Q_bias.  This is consistent with Python behaviour.
+     * NOTE: Python-matched P_bias_init is intentionally very small, so
+     * fast gyro-bias identification should not be expected from short
+     * realtime smoke tests unless a sufficiently observable attitude
+     * measurement set is available.  test_mekf.c uses a focused synthetic
+     * vector-measurement case to verify the bias-state plumbing.
      */
     s->Q[0][0] = 5e-8f;  s->Q[1][1] = 5e-8f;  s->Q[2][2] = 5e-8f;
     s->Q[3][3] = 1e-12f; s->Q[4][4] = 1e-12f; s->Q[5][5] = 1e-12f;
 
-    /* R — sensor noise covariance (matches Python) */
-    s->R_mag[0][0]=1e-4f; s->R_mag[1][1]=1e-4f; s->R_mag[2][2]=1e-4f;
-    s->R_sun[0][0]=1e-4f; s->R_sun[1][1]=1e-4f; s->R_sun[2][2]=1e-4f;
+    /*
+     * R — sensor noise covariance (matches Python MEKF.__init__() exactly).
+     * R_mag = 0.5  (GEO magnetometer: field ~100-200nT vs 30000nT LEO,
+     *               σ_unit_vector ~ 0.7 rad → R = 0.5)
+     * R_sun = 3e-6 (50kg servicer sun sensor: σ ~ 0.1° = 1.7e-3 rad → R = σ²)
+     */
+    s->R_mag[0][0]=0.5f; s->R_mag[1][1]=0.5f; s->R_mag[2][2]=0.5f;
+    s->R_sun[0][0]=3e-6f; s->R_sun[1][1]=3e-6f; s->R_sun[2][2]=3e-6f;
 }
 
 void MEKF_predict(MEKF_State *s, const MEKF_FLOAT omega_m[3]) {
@@ -321,11 +326,6 @@ void MEKF_update(MEKF_State *s,
      */
     MEKF_FLOAT KH[6][6], IKH[6][6];
     mat_mul(&K[0][0], &H[0][0], &KH[0][0], 6, 3, 6);
-    for (int i=0;i<36;i++)
-        ((MEKF_FLOAT*)IKH)[i] = (float)(i/6 == i%6 ? 1.0f : 0.0f)
-                                  - ((MEKF_FLOAT*)KH)[i];
-    /* Rebuild identity correctly (the cast trick above is wrong for non-diagonal) */
-    /* Re-do IKH = I6 - KH properly */
     for (int i=0;i<6;i++)
         for (int j=0;j<6;j++)
             IKH[i][j] = (i==j ? 1.0f : 0.0f) - KH[i][j];

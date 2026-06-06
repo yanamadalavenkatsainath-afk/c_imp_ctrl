@@ -32,6 +32,9 @@
 #include <math.h>
 #include <string.h>
 #include <stdint.h>
+#include "sim_config.h"
+
+#define CPE_MAX_MODEL_PTS  11
 
 /* ── Camera model parameters (set at init, matches CameraSensor) */
 typedef struct {
@@ -42,8 +45,8 @@ typedef struct {
     double min_range;   /* minimum detectable range [m] */
     double max_range;   /* maximum detectable range [m] */
 
-    /* 3U CubeSat model points in body frame [m], up to 8 corners */
-    double model_pts[8][3];
+    /* Chief pose model points in body frame [m]. */
+    double model_pts[CPE_MAX_MODEL_PTS][3];
     int    n_model_pts;
 } CPE_CamParams;
 
@@ -65,8 +68,18 @@ typedef struct {
     /* Filter metadata */
     double  dt;             /* timestep [s]                             */
     double  gate_k;         /* Mahalanobis gate (sigma)                 */
+    double  max_reproj_rms_px;
+    double  pose_age_s;     /* seconds since last accepted/acquired PnP */
     int     update_count;   /* successful PnP updates so far            */
     int     valid;          /* 1 after update_count >= 10               */
+    int     status;         /* 0 none, 1 accepted, 2 rejected, 3 coast,
+                               4 no visible, 5 pnp fail, 6 rms reject,
+                               7 acquire */
+    int     visible_count;
+    unsigned long long visible_mask;
+    int     stub_visible;
+    double  reproj_rms_px;
+    double  pca_cond;
 
     /* Last successful PnP rotation matrix (body → LVLH) */
     double  last_R_b2l[3][3];
@@ -80,6 +93,8 @@ typedef struct {
 typedef struct {
     double omega[3];   /* estimated angular rate [rad/s] */
     int    valid;      /* 1 if filter has converged      */
+    int    status;     /* CPE_State.status snapshot      */
+    double pose_age_s; /* seconds since accepted/acquired PnP */
 } CPE_Result;
 
 /* ── API ──────────────────────────────────────────────────────── */
@@ -94,7 +109,7 @@ typedef struct {
  * dt                  : timestep [s]
  * sigma_omega_process : process noise on omega [rad/s/sqrt(s)]
  * sigma_pnp_deg       : PnP orientation noise 1-sigma [deg]
- * gate_k              : Mahalanobis gate (5.0 matches Python)
+ * gate_k              : Mahalanobis gate (10.0 matches Python)
  */
 void CPE_init(CPE_State *s,
               const CPE_CamParams *cam,
@@ -126,6 +141,18 @@ void CPE_init(CPE_State *s,
 CPE_Result CPE_update(CPE_State *s,
                        const double dr_lvlh[3],
                        const double q_chief[4]);
+
+/**
+ * CPE_update_rotation -- predict + fuse an external body-to-LVLH rotation.
+ *
+ * This is the hardware-facing pose-estimator interface: a camera, flash lidar,
+ * or docking-port vision stack can provide an already-solved R_body2lvlh
+ * measurement, and the CPE EKF handles covariance, gating, stale acquisition,
+ * and omega coasting.  It avoids the synthetic PnP path used by CPE_update().
+ */
+CPE_Result CPE_update_rotation(CPE_State *s,
+                                const double R_body2lvlh_meas[3][3],
+                                double range_m);
 
 /**
  * CPE_get_omega — get current omega estimate [rad/s].

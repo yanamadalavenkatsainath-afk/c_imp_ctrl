@@ -158,6 +158,8 @@ def fill_port_packet(sf: SensorFrame, rng, q_chief, omega_chief, rng_source) -> 
         sf.port.port_axis_lvlh[i] = float(axis_lvlh[i])
         sf.port.port_vel_lvlh[i] = float(port_vel[i])
         sf.port.R_diag[i] = PORT_SENSOR_SIGMA_M ** 2
+        for j in range(3):
+            sf.port.R_body_to_lvlh[i][j] = float(R_c2l[i, j])
     sf.port.valid = 1
 
 
@@ -603,6 +605,23 @@ def run_scenario(name: str, n_ticks: int,
             "omega_deg_s":  plant_i.true_omega_deg_s,
             "pointing_deg": cf_i.att.pointing_err_deg,
             "quest_quality":cf_i.att.quest_quality,
+            # RPOD gate telemetry from C
+            "port_range_m": cf_i.rpod.port_range_m,
+            "port_vrel_ms": cf_i.rpod.port_vrel_ms,
+            "attitude_align_deg": cf_i.rpod.attitude_align_deg,
+            "cone_error_deg": cf_i.rpod.cone_error_deg,
+            "lateral_m": cf_i.rpod.lateral_m,
+            "rpod_phase_elapsed_s": cf_i.rpod.phase_elapsed_s,
+            "rpod_timeout_code": cf_i.rpod.timeout_code,
+            "rpod_has_port": bool(cf_i.rpod.has_port),
+            "rpod_geometry_ok": bool(cf_i.rpod.geometry_ok),
+            "rpod_body_clear": bool(cf_i.rpod.body_clear),
+            "rpod_capture_core": bool(cf_i.rpod.capture_core),
+            "rpod_pose_status": int(cf_i.rpod.pose_status),
+            "rpod_pose_valid": bool(cf_i.rpod.pose_valid),
+            "rpod_pose_age_s": cf_i.rpod.pose_age_s,
+            "rpod_spin_sync_active": bool(cf_i.rpod.spin_sync_active),
+            "rpod_spin_sync_rate_cmd": np.array(list(cf_i.rpod.spin_sync_rate_cmd)),
             "ekf_updated":  bool(cf_i.ekf_updated),
             # truth
             "true_range":   plant_i.true_range,
@@ -636,7 +655,7 @@ def run_scenario(name: str, n_ticks: int,
 
         # ── FSW mode-change one-liner ─────────────────────────────────
         _mn2 = {0:"SAFE",1:"DETUMBLE",2:"SUN_ACQ",3:"FINE_PT",4:"MOM_DUMP"}
-        _rn2 = {0:"NONE",10:"PROX_OPS",11:"TERMINAL",12:"DOCKED"}
+        _rn2 = {0:"NONE",10:"PROX_OPS",11:"TERMINAL",12:"DOCKED",13:"LOST_TGT",14:"SOFT_CAP"}
         if fsw_mode != prev_fsw_mode:
             _ps_c = list(cf.nav.pos_std)
             print(f"  [t={t_sim:7.1f}s] FSW {_mn2.get(prev_fsw_mode,str(prev_fsw_mode)):8s}"
@@ -676,7 +695,7 @@ def run_scenario(name: str, n_ticks: int,
 
         if tick % 1000 == 0:
             _mn  = {0:"SAFE",1:"DETUMBLE",2:"SUN_ACQ",3:"FINE_PT",4:"MOM_DUMP"}
-            _rn  = {0:"NONE",10:"PROX_OPS",11:"TERMINAL",12:"DOCKED"}
+            _rn  = {0:"NONE",10:"PROX_OPS",11:"TERMINAL",12:"DOCKED",13:"LOST_TGT",14:"SOFT_CAP"}
             _a   = np.array(list(cf.cmd.accel_lvlh)) * 1e3   # mm/s^2
             _v   = np.array(list(cf.nav.vel_lvlh))   * 1e3   # mm/s
             _ps  = np.array(list(cf.nav.pos_std))
@@ -789,8 +808,8 @@ def test_rpod_closure(dll):
 
     min_range    = min(r["range_m"] for r in log)  # EKF range: what C RPOD acts on
     final_range  = log[-1]["true_range"]
-    rpod_ticks   = [r for r in log if r["rpod_mode"] in (10, 11, 12)]
-    terminal_rows = [r for r in log if r["rpod_mode"] in (11, 12)]
+    rpod_ticks   = [r for r in log if r["rpod_mode"] in (10, 11, 12, 13, 14)]
+    terminal_rows = [r for r in log if r["rpod_mode"] in (11, 12, 13, 14)]
     docked_rows   = [r for r in log if r["rpod_mode"] == 12]
     rpod_start_t = rpod_ticks[0]["t"] if rpod_ticks else None
     terminal_t   = terminal_rows[0]["t"] if terminal_rows else None
@@ -804,6 +823,21 @@ def test_rpod_closure(dll):
           "  TERMINAL: not reached")
     print(f"  DOCKED first at:    {docked_t:.0f}s" if docked_t is not None else
           "  DOCKED: not reached")
+    rpod_gate_rows = [r for r in log if r["rpod_has_port"]]
+    if rpod_gate_rows:
+        final_gate = rpod_gate_rows[-1]
+        best_align = min((r["attitude_align_deg"] for r in rpod_gate_rows
+                          if math.isfinite(r["attitude_align_deg"])),
+                         default=float("nan"))
+        print(f"  Final C gate port:  {final_gate['port_range_m']:.3f}m"
+              f"  vrel={final_gate['port_vrel_ms']*1000.0:.2f}mm/s"
+              f"  align={final_gate['attitude_align_deg']:.1f}deg"
+              f"  geom={final_gate['rpod_geometry_ok']}")
+        print(f"  Best C gate align:  {best_align:.1f}deg")
+    timeout_rows = [r for r in log if r["rpod_timeout_code"] != 0]
+    print("  C RPOD watchdog:   clear" if not timeout_rows else
+          f"  C RPOD watchdog:   code={timeout_rows[0]['rpod_timeout_code']}"
+          f" at t={timeout_rows[0]['t']:.0f}s")
 
     check(min_range < RPOD_CLOSE_RANGE_M,
           f"RPOD closes range below {RPOD_CLOSE_RANGE_M}m (min={min_range:.2f}m)")
@@ -812,13 +846,19 @@ def test_rpod_closure(dll):
     check(docked_t is not None,
           "RPOD reaches DOCKED mode")
 
-    fine_pt_rows = [r for r in log if r["fsw_mode"] == 3]
+    # During terminal RPOD the C attitude reference is intentionally port-facing,
+    # not the old identity/nadir hold.  Keep the identity-pointing health check
+    # on the pre-RPOD fine-pointing segment and let the docking checks above
+    # validate terminal attitude behavior.
+    fine_pt_rows = [r for r in log
+                    if r["fsw_mode"] == 3
+                    and (rpod_start_t is None or r["t"] < rpod_start_t)]
     if fine_pt_rows:
         max_pt_err  = max(r["pointing_deg"] for r in fine_pt_rows)
         n_tail      = max(1, len(fine_pt_rows) // 10)
         settled_err = max(r["pointing_deg"] for r in fine_pt_rows[-n_tail:])
-        print(f"  Max pointing error (all time):      {max_pt_err:.2f}deg")
-        print(f"  Settled pointing error (final 10%): {settled_err:.2f}deg")
+        print(f"  Max pointing error (pre-RPOD):      {max_pt_err:.2f}deg")
+        print(f"  Settled pointing error (pre-RPOD):  {settled_err:.2f}deg")
         check(settled_err < POINTING_ERR_MAX_DEG,
               f"pointing settles below {POINTING_ERR_MAX_DEG}deg"
               f" (settled={settled_err:.2f}deg  peak={max_pt_err:.2f}deg)")

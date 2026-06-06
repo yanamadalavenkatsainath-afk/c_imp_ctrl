@@ -24,8 +24,26 @@ typedef struct {
     uint32_t missed_deadlines; double deadline_ms;
 } TimingTelemetry;
 typedef struct {
+    double  port_range_m;
+    double  port_vrel_ms;
+    double  attitude_align_deg;
+    double  cone_error_deg;
+    double  lateral_m;
+    double  phase_elapsed_s;
+    int32_t has_port;
+    int32_t geometry_ok;
+    int32_t body_clear;
+    int32_t capture_core;
+    int32_t timeout_code;
+    double  pose_age_s;
+    double  spin_sync_rate_cmd[3];
+    int32_t pose_status;
+    int32_t pose_valid;
+    int32_t spin_sync_active;
+} RPODTelemetry;
+typedef struct {
     NavState nav; AttState att; GuidanceCmd cmd;
-    TimingTelemetry timing;
+    TimingTelemetry timing; RPODTelemetry rpod;
     uint8_t ekf_updated; uint8_t _pad[7];
 } CommandFrame;
 #endif

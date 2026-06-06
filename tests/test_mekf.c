@@ -10,15 +10,34 @@
 #include <string.h>
 #include "mekf.h"
 
-#define CHECK(cond, msg) printf("  %s — %s\n", (cond)?"✓ PASS":"✗ FAIL", msg)
+static int n_fail = 0;
+
+#define CHECK(cond, msg) \
+    do { printf("  %s -- %s\n", (cond) ? "PASS" : "FAIL", msg); \
+         if(!(cond)) n_fail++; } while(0)
 #define DEG2RAD(x) ((x)*3.14159265f/180.0f)
 #define RAD2DEG(x) ((x)*180.0f/3.14159265f)
 
 int main(void) {
     printf("=== MEKF C Verification ===\n\n");
 
+    printf("Test 0: Init constants match Python MEKF\n");
+    {
+        MEKF_State s;
+        MEKF_init(&s, 0.1f);
+
+        CHECK(fabsf(s.P[0][0] - 3.046e-6f) < 1e-10f,
+              "P_att uses (0.1 deg)^2, not 0.1 rad^2");
+        CHECK(fabsf(s.P[3][3] - 5.876e-12f) < 1e-15f,
+              "P_bias uses (0.5 deg/hr)^2");
+        CHECK(fabsf(s.R_mag[0][0] - 0.5f) < 1e-7f,
+              "R_mag matches GEO Python value 0.5");
+        CHECK(fabsf(s.R_sun[0][0] - 3e-6f) < 1e-12f,
+              "R_sun matches Python value 3e-6");
+    }
+
     /* ── Test 1: Identity init — quaternion stays unit norm ────── */
-    printf("Test 1: Quaternion stays unit norm after 100 predict steps\n");
+    printf("\nTest 1: Quaternion stays unit norm after 100 predict steps\n");
     {
         MEKF_State s;
         MEKF_init(&s, 0.1f);
@@ -112,6 +131,7 @@ int main(void) {
         CHECK(pos_ok, "P diagonal is positive");
     }
 
-    printf("\n=== Done ===\n");
-    return 0;
+    printf("\n=== %s (%d failures) ===\n",
+           n_fail == 0 ? "ALL PASS" : "FAILURES DETECTED", n_fail);
+    return n_fail == 0 ? 0 : 1;
 }

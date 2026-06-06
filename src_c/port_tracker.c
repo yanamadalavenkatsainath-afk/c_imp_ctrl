@@ -1,11 +1,8 @@
 #include "port_tracker.h"
+#include "sim_config.h"
 
 #include <math.h>
 #include <string.h>
-
-#define PT_ALPHA             0.40
-#define PT_INNOV_GATE_M      0.25
-#define PT_MAX_COAST_S       5.0
 
 static double _norm3d(const double v[3]){
     return sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
@@ -32,14 +29,18 @@ int PT_update(PortTracker *pt,
             pt->initialized = 1;
         }else{
             for(int i=0;i<3;i++) innov[i] = port_meas[i] - pt->pos[i];
-            if(_norm3d(innov) <= PT_INNOV_GATE_M){
-                for(int i=0;i<3;i++) pt->pos[i] += PT_ALPHA * innov[i];
+            /* Soft gate — clip innovation to gate radius, still apply (matches Python). */
+            double innov_norm = _norm3d(innov);
+            if(innov_norm > CFG_PORT_TRACK_GATE_M){
+                double scale = CFG_PORT_TRACK_GATE_M / innov_norm;
+                for(int i=0;i<3;i++) innov[i] *= scale;
             }
+            for(int i=0;i<3;i++) pt->pos[i] += CFG_PORT_TRACK_ALPHA * innov[i];
         }
         pt->coast_s = 0.0;
     }else if(pt->initialized){
         pt->coast_s += dt;
-        if(pt->coast_s > PT_MAX_COAST_S){
+        if(pt->coast_s > CFG_PORT_TRACK_MAX_COAST_S){
             PT_reset(pt);
         }
     }

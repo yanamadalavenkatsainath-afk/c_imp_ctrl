@@ -29,7 +29,12 @@ static double norm3(const double v[3]) {
 static void init_term_state(RPOD_TermState *s) {
     memset(s, 0, sizeof(*s));
     s->port_axis_lvlh[2] = 1.0;
+    s->R_body_to_lvlh[0][0] = 1.0;
+    s->R_body_to_lvlh[1][1] = 1.0;
+    s->R_body_to_lvlh[2][2] = 1.0;
+    s->has_body_R = 1;
     s->geometry_ok = 1;
+    s->body_clear = 1;
 }
 
 
@@ -103,17 +108,17 @@ static void test_prox_speed_profile(void) {
     }
 
 
-/* ── Test 3: PROX_OPS → TERMINAL handoff at 5m ───────────────
+/* ── Test 3: PROX_OPS → TERMINAL handoff at 10m ──────────────
    When truth_range < RPOD_TERMINAL_M the function must call
    through to RPOD_terminal and return what it returns.           */
 static void test_prox_terminal_handoff(void) {
-    printf("\nTest 3: PROX_OPS → TERMINAL handoff at range < 5m\n");
+    printf("\nTest 3: PROX_OPS → TERMINAL handoff at range < 10m\n");
 
     double n_chief   = 7.292e-5;
     double accel_max = 0.020;
 
     RPOD_State state;
-    state.pos[0] = 0.5;   /* 0.5m — inside TERMINAL_M = 5m */
+    state.pos[0] = 0.5;   /* 0.5m — inside TERMINAL_M = 10m */
     state.pos[1] = 0.0;
     state.pos[2] = 0.0;
     state.vel[0] = -0.003;   /* 3mm/s closing */
@@ -132,7 +137,7 @@ static void test_prox_terminal_handoff(void) {
     double diff = fabs(accel_prox[0] - accel_term[0])
                 + fabs(accel_prox[1] - accel_term[1])
                 + fabs(accel_prox[2] - accel_term[2]);
-    CHECK(diff < 1e-9, "PROX_OPS delegates to TERMINAL for range < 5m");
+    CHECK(diff < 1e-9, "PROX_OPS delegates to TERMINAL for range < 10m");
     printf("  prox=[%.5f,%.5f,%.5f]  term=[%.5f,%.5f,%.5f]\n",
            accel_prox[0], accel_prox[1], accel_prox[2],
            accel_term[0], accel_term[1], accel_term[2]);
@@ -299,7 +304,7 @@ static void test_prox_deadband(void) {
     state.vel[1] = 0.0;
     state.vel[2] = 0.0;
 
-    /* truth_range = 0.03 < TERMINAL_M = 5.0, so PROX falls through
+    /* truth_range = 0.03 < TERMINAL_M = 10.0, so PROX falls through
        to TERMINAL, which returns 1 and zeros accel */
     double accel[3];
     RPOD_prox_ops(&state, 0.03, n_chief, accel_max, accel);
@@ -313,6 +318,7 @@ static void test_terminal_soft_capture_hold(void) {
     double accel_max = 0.020;
     RPOD_TermState state;
     init_term_state(&state);
+    state.has_body_R = 0;  /* legacy toy port at z=0.05m, not real body geometry */
     state.pos[0] = 0.0;
     state.pos[1] = 0.0;
     state.pos[2] = 0.046;
@@ -367,6 +373,52 @@ static void test_terminal_vmax(void) {
 
 
 /* ── main ─────────────────────────────────────────────────────── */
+static void test_geometry_dock_aperture_body_clear(void) {
+    printf("\nTest 8b: finite-body gate permits dock-aperture contact\n");
+
+    RPOD_TermState state;
+    init_term_state(&state);
+    state.pos[0] = 0.0;
+    state.pos[1] = 0.0;
+    state.pos[2] = CFG_DOCK_PORT_BODY_Z_M;
+    state.port_lvlh[0] = 0.0;
+    state.port_lvlh[1] = 0.0;
+    state.port_lvlh[2] = CFG_DOCK_PORT_BODY_Z_M;
+    state.has_port = 1;
+
+    RPOD_fill_geometry(&state);
+
+    CHECK(state.has_geometry == 1, "geometry is populated for a valid port");
+    CHECK(state.body_clear == 1,
+          "contact at the docking aperture is body-clear");
+    CHECK(state.capture_core == 1,
+          "zero port range is inside the capture core");
+    CHECK(state.geometry_ok == 1,
+          "dock-aperture contact passes geometry");
+}
+
+static void test_geometry_body_penetration_blocks(void) {
+    printf("\nTest 8c: finite-body gate rejects raw body penetration\n");
+
+    RPOD_TermState state;
+    init_term_state(&state);
+    state.pos[0] = 0.40;
+    state.pos[1] = 0.0;
+    state.pos[2] = 0.0;
+    state.port_lvlh[0] = 0.0;
+    state.port_lvlh[1] = 0.0;
+    state.port_lvlh[2] = CFG_DOCK_PORT_BODY_Z_M;
+    state.has_port = 1;
+
+    RPOD_fill_geometry(&state);
+
+    CHECK(state.has_geometry == 1, "geometry is populated for penetration case");
+    CHECK(state.body_clear == 0,
+          "inside the chief body away from the dock face is not body-clear");
+    CHECK(state.geometry_ok == 0,
+          "body penetration blocks capture geometry");
+}
+
 int main(void) {
     printf("=== RPOD Controller C Verification ===\n\n");
 
@@ -381,6 +433,8 @@ int main(void) {
     test_prox_deadband();
     test_terminal_vmax();
     test_terminal_soft_capture_hold();
+    test_geometry_dock_aperture_body_clear();
+    test_geometry_body_penetration_blocks();
 
     printf("\n=== %s (%d failures) ===\n",
            n_fail == 0 ? "ALL PASS" : "FAILURES DETECTED", n_fail);

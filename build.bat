@@ -51,13 +51,18 @@ gcc -fPIC -shared -O2 -DMEKF_NO_CMSIS ^
     -o gnc_lib.dll ^
     src_c/th_ekf.c ^
     src_c/mekf.c ^
+    src_c/capture_gate.c ^
     src_c/rpod_ctrl.c ^
     src_c/terminal_filter.c ^
     src_c/port_tracker.c ^
+    src_c/spin_sync_controller.c ^
+    src_c/nmc_guidance.c ^
+    src_c/keepout_planner.c ^
     src_c/quest.c ^
     src_c/adcs.c ^
     src_c/mode_manager.c ^
     src_c/lambert_solver.c ^
+    src_c/rpod_sequencer.c ^
     src_c/chief_pose_estimator.c ^
     src_c/flight_loop.c ^
     -lm
@@ -71,13 +76,18 @@ gcc -O2 -DMEKF_NO_CMSIS -DFLIGHT_LOOP_STANDALONE -Isrc_c ^
     src_c/flight_loop.c ^
     src_c/th_ekf.c ^
     src_c/mekf.c ^
+    src_c/capture_gate.c ^
     src_c/rpod_ctrl.c ^
     src_c/terminal_filter.c ^
     src_c/port_tracker.c ^
+    src_c/spin_sync_controller.c ^
+    src_c/nmc_guidance.c ^
+    src_c/keepout_planner.c ^
     src_c/quest.c ^
     src_c/adcs.c ^
     src_c/mode_manager.c ^
     src_c/lambert_solver.c ^
+    src_c/rpod_sequencer.c ^
     src_c/chief_pose_estimator.c ^
     -lm
 if %errorlevel% neq 0 ( echo FLIGHT LOOP BUILD FAILED & exit /b 1 )
@@ -90,7 +100,25 @@ if %errorlevel% neq 0 ( echo TH-EKF TEST BUILD FAILED & exit /b 1 )
 gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_mekf.exe tests/test_mekf.c src_c/mekf.c -lm
 if %errorlevel% neq 0 ( echo MEKF TEST BUILD FAILED & exit /b 1 )
 
-gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_rpod.exe tests/test_rpod.c src_c/rpod_ctrl.c -lm
+gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_capture_gate.exe tests/test_capture_gate.c src_c/capture_gate.c -lm
+if %errorlevel% neq 0 ( echo CAPTURE GATE TEST BUILD FAILED & exit /b 1 )
+
+gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_port_tracker.exe tests/test_port_tracker.c src_c/port_tracker.c -lm
+if %errorlevel% neq 0 ( echo PORT TRACKER TEST BUILD FAILED & exit /b 1 )
+
+gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_terminal_filter.exe tests/test_terminal_filter.c src_c/terminal_filter.c -lm
+if %errorlevel% neq 0 ( echo TERMINAL FILTER TEST BUILD FAILED & exit /b 1 )
+
+gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_spin_sync_controller.exe tests/test_spin_sync_controller.c src_c/spin_sync_controller.c -lm
+if %errorlevel% neq 0 ( echo SPIN SYNC CONTROLLER TEST BUILD FAILED & exit /b 1 )
+
+gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_nmc_guidance.exe tests/test_nmc_guidance.c src_c/nmc_guidance.c -lm
+if %errorlevel% neq 0 ( echo NMC GUIDANCE TEST BUILD FAILED & exit /b 1 )
+
+gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_keepout_planner.exe tests/test_keepout_planner.c src_c/keepout_planner.c -lm
+if %errorlevel% neq 0 ( echo KEEPOUT PLANNER TEST BUILD FAILED & exit /b 1 )
+
+gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_rpod.exe tests/test_rpod.c src_c/rpod_ctrl.c src_c/capture_gate.c -lm
 if %errorlevel% neq 0 ( echo RPOD TEST BUILD FAILED & exit /b 1 )
 
 gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_quest.exe tests/test_quest.c src_c/quest.c -lm
@@ -104,6 +132,9 @@ if %errorlevel% neq 0 ( echo MODE MANAGER TEST BUILD FAILED & exit /b 1 )
 
 gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_lambert.exe tests/test_lambert.c src_c/lambert_solver.c -lm
 if %errorlevel% neq 0 ( echo LAMBERT TEST BUILD FAILED & exit /b 1 )
+
+gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_rpod_sequencer.exe tests/test_rpod_sequencer.c src_c/rpod_sequencer.c src_c/rpod_ctrl.c src_c/capture_gate.c src_c/lambert_solver.c -lm
+if %errorlevel% neq 0 ( echo RPOD SEQUENCER TEST BUILD FAILED & exit /b 1 )
 
 gcc -O2 -DMEKF_NO_CMSIS -Isrc_c -o test_chief_pose.exe tests/test_chief_pose.c src_c/chief_pose_estimator.c -lm
 if %errorlevel% neq 0 ( echo CHIEF POSE TEST BUILD FAILED & exit /b 1 )
@@ -119,6 +150,18 @@ test_thekf.exe
 if %errorlevel% neq 0 ( echo TH-EKF TESTS FAILED & exit /b 1 )
 test_mekf.exe
 if %errorlevel% neq 0 ( echo MEKF TESTS FAILED & exit /b 1 )
+test_capture_gate.exe
+if %errorlevel% neq 0 ( echo CAPTURE GATE TESTS FAILED & exit /b 1 )
+test_port_tracker.exe
+if %errorlevel% neq 0 ( echo PORT TRACKER TESTS FAILED & exit /b 1 )
+test_terminal_filter.exe
+if %errorlevel% neq 0 ( echo TERMINAL FILTER TESTS FAILED & exit /b 1 )
+test_spin_sync_controller.exe
+if %errorlevel% neq 0 ( echo SPIN SYNC CONTROLLER TESTS FAILED & exit /b 1 )
+test_nmc_guidance.exe
+if %errorlevel% neq 0 ( echo NMC GUIDANCE TESTS FAILED & exit /b 1 )
+test_keepout_planner.exe
+if %errorlevel% neq 0 ( echo KEEPOUT PLANNER TESTS FAILED & exit /b 1 )
 test_rpod.exe
 if %errorlevel% neq 0 ( echo RPOD TESTS FAILED & exit /b 1 )
 test_quest.exe
@@ -129,6 +172,8 @@ test_mode_manager.exe
 if %errorlevel% neq 0 ( echo MODE MANAGER TESTS FAILED & exit /b 1 )
 test_lambert.exe
 if %errorlevel% neq 0 ( echo LAMBERT TESTS FAILED & exit /b 1 )
+test_rpod_sequencer.exe
+if %errorlevel% neq 0 ( echo RPOD SEQUENCER TESTS FAILED & exit /b 1 )
 test_chief_pose.exe
 if %errorlevel% neq 0 ( echo CHIEF POSE TESTS FAILED & exit /b 1 )
 

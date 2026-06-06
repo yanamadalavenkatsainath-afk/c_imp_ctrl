@@ -65,6 +65,7 @@ class PortPacket(ctypes.Structure):
         ("port_lvlh", ctypes.c_double * 3),
         ("port_axis_lvlh", ctypes.c_double * 3),
         ("port_vel_lvlh", ctypes.c_double * 3),
+        ("R_body_to_lvlh", (ctypes.c_double * 3) * 3),
         ("R_diag",    ctypes.c_double * 3),
         ("valid",     ctypes.c_uint8),
         ("_pad",      ctypes.c_uint8 * 7),
@@ -133,12 +134,33 @@ class TimingTelemetry(ctypes.Structure):
         ("deadline_ms",       ctypes.c_double),
     ]
 
+class RPODTelemetry(ctypes.Structure):
+    _fields_ = [
+        ("port_range_m",       ctypes.c_double),
+        ("port_vrel_ms",       ctypes.c_double),
+        ("attitude_align_deg", ctypes.c_double),
+        ("cone_error_deg",     ctypes.c_double),
+        ("lateral_m",          ctypes.c_double),
+        ("phase_elapsed_s",    ctypes.c_double),
+        ("has_port",           ctypes.c_int32),
+        ("geometry_ok",        ctypes.c_int32),
+        ("body_clear",         ctypes.c_int32),
+        ("capture_core",       ctypes.c_int32),
+        ("timeout_code",       ctypes.c_int32),
+        ("pose_age_s",         ctypes.c_double),
+        ("spin_sync_rate_cmd", ctypes.c_double * 3),
+        ("pose_status",        ctypes.c_int32),
+        ("pose_valid",         ctypes.c_int32),
+        ("spin_sync_active",   ctypes.c_int32),
+    ]
+
 class CommandFrame(ctypes.Structure):
     _fields_ = [
         ("nav",         NavState),
         ("att",         AttState),
         ("cmd",         GuidanceCmd),
         ("timing",      TimingTelemetry),
+        ("rpod",        RPODTelemetry),
         ("ekf_updated", ctypes.c_uint8),
         ("_pad",        ctypes.c_uint8 * 7),
     ]
@@ -365,6 +387,8 @@ class FakeSensorSim:
                     sf.port.port_axis_lvlh[i] = axis_lvlh[i]
                     sf.port.port_vel_lvlh[i] = port_vel[i]
                     sf.port.R_diag[i]    = PORT_SENSOR_SIGMA_M ** 2
+                    for j in range(3):
+                        sf.port.R_body_to_lvlh[i][j] = R_c2l[i, j]
                 sf.port.valid = 1
             else:
                 sf.port.valid = 0

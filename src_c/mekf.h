@@ -1,6 +1,11 @@
 /**
  * mekf.h — Multiplicative EKF for Spacecraft Attitude
  * =====================================================
+ *
+ * Port note: the vector-measurement MEKF path is ported here.  Python's
+ * update_star_tracker() full-quaternion measurement update is not exposed
+ * in this C API yet; add a dedicated MEKF_update_star_tracker() before
+ * wiring a hardware star-tracker packet into the C flight loop.
  * Direct port of mekf.py — Markley & Crassidis §7.3
  *
  * State (error state, 6×1):

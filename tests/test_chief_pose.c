@@ -22,8 +22,11 @@ static int n_fail = 0;
 static void test_init_norm(void) {
     printf("Test 1: Init — quaternion is unit norm\n");
     CPE_CamParams cam; CPE_default_cam_params(&cam);
+    CHECK(cam.n_model_pts == CPE_MAX_MODEL_PTS, "default chief pose model uses 11 feature points");
+    CHECK(fabs(cam.model_pts[0][0] - CFG_CHIEF_BODY_HALF_X_M) < 1e-12,
+          "default chief pose model uses IS-1002 scale");
     CPE_State s;
-    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 5.0);
+    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 10.0);
 
     double n=sqrt(s.q[0]*s.q[0]+s.q[1]*s.q[1]+s.q[2]*s.q[2]+s.q[3]*s.q[3]);
     printf("  |q| = %.8f\n", n);
@@ -35,7 +38,7 @@ static void test_init_P(void) {
     printf("\nTest 2: Init — P diagonal is positive\n");
     CPE_CamParams cam; CPE_default_cam_params(&cam);
     CPE_State s;
-    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 5.0);
+    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 10.0);
     int ok=1;
     for(int i=0;i<6;i++) if(s.P[i][i]<=0.) ok=0;
     CHECK(ok, "all diagonal P elements > 0");
@@ -47,7 +50,7 @@ static void test_predict_norm(void) {
     printf("\nTest 3: Predict — quaternion stays unit norm after 200 steps\n");
     CPE_CamParams cam; CPE_default_cam_params(&cam);
     CPE_State s;
-    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 5.0);
+    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 10.0);
 
     /* Set a nonzero omega */
     s.omega[0]=0.002; s.omega[1]=-0.001; s.omega[2]=0.0005;
@@ -67,12 +70,12 @@ static void test_P_symmetric(void) {
     printf("\nTest 4: Covariance stays symmetric after predict/update\n");
     CPE_CamParams cam; CPE_default_cam_params(&cam);
     CPE_State s;
-    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 5.0);
+    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 10.0);
 
     srand(42);
     double q_id[4]={1.,0.,0.,0.};
     /* Run at close range (2m) to get PnP successes */
-    double dr[3]={0.,-2.,0.};
+    double dr[3]={0.,-5.,0.};
     for(int i=0;i<100;i++) CPE_update(&s, dr, q_id);
 
     int sym_ok=1;
@@ -90,12 +93,12 @@ static void test_valid_flag(void) {
     printf("\nTest 5: valid flag set after >= 10 successful PnP updates\n");
     CPE_CamParams cam; CPE_default_cam_params(&cam);
     CPE_State s;
-    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 5.0);
+    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 10.0);
 
     srand(42);
     double q_id[4]={1.,0.,0.,0.};
     /* 2m range — close enough for multiple PnP successes */
-    double dr[3]={0.,-2.,0.};
+    double dr[3]={0.,-5.,0.};
 
     int became_valid=0;
     for(int i=0;i<200;i++){
@@ -111,13 +114,13 @@ static void test_uncertainty_decreases(void) {
     printf("\nTest 6: Omega uncertainty decreases with successful updates\n");
     CPE_CamParams cam; CPE_default_cam_params(&cam);
     CPE_State s;
-    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 5.0);
+    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 10.0);
 
     double unc_init = CPE_omega_uncertainty(&s);
 
     srand(42);
     double q_id[4]={1.,0.,0.,0.};
-    double dr[3]={0.,-2.,0.};
+    double dr[3]={0.,-5.,0.};
     for(int i=0;i<100;i++) CPE_update(&s, dr, q_id);
 
     double unc_after = CPE_omega_uncertainty(&s);
@@ -131,7 +134,7 @@ static void test_far_range_no_update(void) {
     printf("\nTest 7: Far range (10km) — update_count stays 0\n");
     CPE_CamParams cam; CPE_default_cam_params(&cam);
     CPE_State s;
-    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 5.0);
+    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 10.0);
 
     srand(0);
     double q_id[4]={1.,0.,0.,0.};
@@ -148,7 +151,7 @@ static void test_R_accessor(void) {
     printf("\nTest 8: CPE_get_R_body2lvlh returns 0 before first PnP\n");
     CPE_CamParams cam; CPE_default_cam_params(&cam);
     CPE_State s;
-    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 5.0);
+    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 10.0);
 
     double R[3][3];
     int got = CPE_get_R_body2lvlh(&s, R);
@@ -158,7 +161,7 @@ static void test_R_accessor(void) {
     /* Run at close range to get a PnP */
     srand(42);
     double q_id[4]={1.,0.,0.,0.};
-    double dr[3]={0.,-2.,0.};
+    double dr[3]={0.,-5.,0.};
     for(int i=0;i<50;i++) CPE_update(&s, dr, q_id);
     got = CPE_get_R_body2lvlh(&s, R);
     printf("  has_R_b2l after 50 steps = %d\n", got);
@@ -167,6 +170,34 @@ static void test_R_accessor(void) {
 }
 
 /* ── main ─────────────────────────────────────────────────────── */
+static void test_update_rotation_hardware_interface(void) {
+    printf("\nTest 9: CPE_update_rotation fuses external pose measurement\n");
+    CPE_CamParams cam; CPE_default_cam_params(&cam);
+    CPE_State s;
+    CPE_init(&s, &cam, 0.1, 0.001, 3.0, 10.0);
+
+    double c = cos(20.0 * M_PI / 180.0);
+    double sn = sin(20.0 * M_PI / 180.0);
+    double R_meas[3][3] = {
+        { c, -sn, 0.0 },
+        { sn,  c, 0.0 },
+        {0.0, 0.0, 1.0 }
+    };
+
+    CPE_Result r = {0};
+    for(int i=0;i<12;i++) {
+        r = CPE_update_rotation(&s, R_meas, 5.0);
+    }
+
+    double R_out[3][3];
+    int got = CPE_get_R_body2lvlh(&s, R_out);
+    CHECK(got == 1, "hardware rotation update stores R_body2lvlh");
+    CHECK(r.valid == 1, "hardware rotation update reaches valid after repeated accepts");
+    CHECK(fabs(R_out[0][0] - c) < 1e-12 &&
+          fabs(R_out[1][0] - sn) < 1e-12,
+          "stored rotation matches external measurement");
+}
+
 int main(void) {
     printf("=== Chief Pose Estimator C Verification ===\n\n");
     test_init_norm();
@@ -177,6 +208,7 @@ int main(void) {
     test_uncertainty_decreases();
     test_far_range_no_update();
     test_R_accessor();
+    test_update_rotation_hardware_interface();
     printf("\n=== %s (%d failures) ===\n",
            n_fail==0?"ALL PASS":"FAILURES DETECTED", n_fail);
     return n_fail==0?0:1;

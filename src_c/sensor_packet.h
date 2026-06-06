@@ -43,6 +43,7 @@ typedef struct {
     double  port_lvlh[3];   /* docking port position in LVLH [m] */
     double  port_axis_lvlh[3]; /* docking port outward axis in LVLH */
     double  port_vel_lvlh[3];  /* docking port velocity in LVLH [m/s] */
+    double  R_body_to_lvlh[3][3]; /* chief body-to-LVLH rotation */
     double  R_diag[3];      /* diagonal of R (noise variances)   */
     uint8_t valid;
     uint8_t _pad[7];

@@ -18,10 +18,10 @@
 #include <stdio.h>
 
 /* ── Compile-time limits ──────────────────────────────────────── */
-#define CPE_MAX_PTS      8    /* max model points (3U = 8 corners) */
-#define CPE_MAX_VIS      8    /* max visible points per frame       */
+#define CPE_MAX_PTS      CPE_MAX_MODEL_PTS
+#define CPE_MAX_VIS      CPE_MAX_MODEL_PTS
 /* EPnP linear system: 2*MAX_VIS rows × 12 cols */
-#define CPE_L_ROWS      16    /* 2 * CPE_MAX_VIS */
+#define CPE_L_ROWS      (2 * CPE_MAX_VIS)
 #define CPE_L_COLS      12
 
 /* ── Gaussian noise via Box-Muller (no libm randn) ──────────── */
@@ -85,6 +85,23 @@ static void _R2q(const double R[3][3], double q[4]) {
         q[3] = 0.25 * s;
     }
     _qnorm(q);
+}
+
+static void _reset_pose_covariance(CPE_State *s, double att_deg, double omega_deg_s) {
+    memset(s->P, 0, sizeof(s->P));
+    double sig_att = att_deg * M_PI / 180.0;
+    double sig_w = omega_deg_s * M_PI / 180.0;
+    for (int i=0;i<3;i++) s->P[i][i] = sig_att * sig_att;
+    for (int i=3;i<6;i++) s->P[i][i] = sig_w * sig_w;
+}
+
+static void _reset_debug(CPE_State *s) {
+    s->status = 0;
+    s->visible_count = 0;
+    s->visible_mask = 0ULL;
+    s->stub_visible = 0;
+    s->reproj_rms_px = NAN;
+    s->pca_cond = NAN;
 }
 
 /* ── 3x3 matrix helpers ───────────────────────────────────────── */
@@ -304,9 +321,12 @@ static int _estimate_orientation(CPE_State *s,
         px_obs[M][0]=u+_randn()*s->cam.sigma_px;
         px_obs[M][1]=v+_randn()*s->cam.sigma_px;
         for(int k=0;k<3;k++) pts_body[M][k]=s->cam.model_pts[i][k];
+        if (i < 63) s->visible_mask |= (1ULL << (unsigned)i);
+        if (i == 8 || i == 9) s->stub_visible = 1;
         M++;
     }
-    if (M<4) return 0;
+    s->visible_count = M;
+    if (M<4) { s->status = 4; return 0; }
 
     /* ── EPnP step 1: centroid + PCA (simplified — use centroid + axis-aligned) */
     double c0[3]={0.,0.,0.};
@@ -334,6 +354,13 @@ static int _estimate_orientation(CPE_State *s,
         }
     }
     double sv[3]={Sc[0][0],Sc[1][1],Sc[2][2]};
+    double sv_max=fabs(sv[0]), sv_min=fabs(sv[0]);
+    for(int i=1;i<3;i++){
+        double a=fabs(sv[i]);
+        if(a>sv_max) sv_max=a;
+        if(a<sv_min) sv_min=a;
+    }
+    s->pca_cond = sv_max / (sv_min > 1e-12 ? sv_min : 1e-12);
     /* 4 control points: c0, c0 + v0*sqrt(sv0/M), ... */
     double ctrl_body[4][3];
     for(int k=0;k<3;k++) ctrl_body[0][k]=c0[k];
@@ -402,12 +429,9 @@ static int _estimate_orientation(CPE_State *s,
 
     /* det correction */
     double R_b2c_tmp[3][3], VU[3][3];
-    double Vt_T[3][3]; _mat3_T(Vt_p, Vt_T);
-    _mat3_mul(Vt_T, U_p, VU);  /* V @ U^T */
-    /* But we want U @ diag([1,1,det(U*Vt)]) @ Vt */
-    double VtT2[3][3]; _mat3_T(Vt_p, VtT2);
-    _mat3_mul(U_p, VtT2, VU);  /* U @ V (wrong order — fix below) */
-    /* Correct: R = U @ diag @ Vt */
+    double Vt_T[3][3];
+    _mat3_T(Vt_p, Vt_T);
+    _mat3_mul(U_p, Vt_T, VU);
     double det_VU = VU[0][0]*(VU[1][1]*VU[2][2]-VU[1][2]*VU[2][1])
                   - VU[0][1]*(VU[1][0]*VU[2][2]-VU[1][2]*VU[2][0])
                   + VU[0][2]*(VU[1][0]*VU[2][1]-VU[1][1]*VU[2][0]);
@@ -419,6 +443,22 @@ static int _estimate_orientation(CPE_State *s,
     /* R_body2lvlh = R_l2c^T @ R_body2cam */
     double R_l2c_T[3][3]; _mat3_T(R_l2c, R_l2c_T);
     _mat3_mul(R_l2c_T, R_b2c_tmp, R_out);
+
+    double err2_sum=0.0;
+    int err_n=0;
+    for(int i=0;i<M;i++){
+        double pc_rot[3];
+        _mat3_vec(R_b2c_tmp, pts_body[i], pc_rot);
+        for(int k=0;k<3;k++) pc_rot[k] += dr_cam[k];
+        if(pc_rot[2] <= 0.01) continue;
+        double u = s->cam.f * pc_rot[0] / pc_rot[2] + s->cam.cx;
+        double v = s->cam.f * pc_rot[1] / pc_rot[2] + s->cam.cy;
+        double du = u - px_obs[i][0];
+        double dv = v - px_obs[i][1];
+        err2_sum += du*du + dv*dv;
+        err_n++;
+    }
+    s->reproj_rms_px = (err_n > 0) ? sqrt(err2_sum / (double)err_n) : NAN;
     return 1;
 }
 
@@ -428,16 +468,9 @@ static void _predict(CPE_State *s) {
     double dt=s->dt;
     double wx=s->omega[0], wy=s->omega[1], wz=s->omega[2];
 
-    /* Quaternion kinematics: q += 0.5*dt*Omega(w)*q */
-    double Omega_q[4] = {
-        -wx*s->q[1] - wy*s->q[2] - wz*s->q[3],
-         wx*s->q[0] + wz*s->q[2] - wy*s->q[3],  /* typo-safe: Omega mat */
-         wy*s->q[0] - wz*s->q[1] + wx*s->q[3],
-         wz*s->q[0] + wy*s->q[1] - wx*s->q[2]
-    };
-    /* Correct Omega @ q per Python:
-       Omega = 0.5*[[0,-wx,-wy,-wz],[wx,0,wz,-wy],[wy,-wz,0,wx],[wz,wy,-wx,0]]
-       (q_dot = 0.5 * Omega @ q)                                               */
+    /* Quaternion kinematics: q += 0.5*dt*Omega(w)*q
+     * Omega = 0.5*[[0,-wx,-wy,-wz],[wx,0,wz,-wy],[wy,-wz,0,wx],[wz,wy,-wx,0]]
+     * (q_dot = 0.5 * Omega @ q) — matches Python exactly. */
     double Omega_q2[4] = {
         0.5*( -wx*s->q[1] - wy*s->q[2] - wz*s->q[3]),
         0.5*(  wx*s->q[0] + wz*s->q[2] - wy*s->q[3]),
@@ -489,7 +522,7 @@ static void _predict(CPE_State *s) {
 
 /* ── EKF update from rotation matrix ─────────────────────────── */
 
-static void _update(CPE_State *s, const double R_meas[3][3], const double R_noise[3][3]) {
+static int _update(CPE_State *s, const double R_meas[3][3], const double R_noise[3][3]) {
     double R_est[3][3]; _q2R(s->q, R_est);
 
     /* Innovation: R_err = R_meas @ R_est^T */
@@ -517,7 +550,7 @@ static void _update(CPE_State *s, const double R_meas[3][3], const double R_nois
     double det=S[0][0]*(S[1][1]*S[2][2]-S[1][2]*S[2][1])
               -S[0][1]*(S[1][0]*S[2][2]-S[1][2]*S[2][0])
               +S[0][2]*(S[1][0]*S[2][1]-S[1][1]*S[2][0]);
-    if(fabs(det)<1e-30) return;
+    if(fabs(det)<1e-30) return 0;
     double inv=1.0/det;
     double S_inv[3][3];
     S_inv[0][0]= inv*(S[1][1]*S[2][2]-S[1][2]*S[2][1]);
@@ -534,7 +567,7 @@ static void _update(CPE_State *s, const double R_meas[3][3], const double R_nois
     double Si_z[3];
     for(int i=0;i<3;i++){Si_z[i]=0.; for(int j=0;j<3;j++) Si_z[i]+=S_inv[i][j]*z_err[j];}
     double mah2=_dot3(z_err,Si_z);
-    if(mah2>s->gate_k*s->gate_k) return;
+    if(mah2>s->gate_k*s->gate_k) return 0;
 
     /* K = P H^T S^{-1} — H^T = [I;0] so P H^T = P[:,0:3] */
     double K[6][3];
@@ -586,6 +619,7 @@ static void _update(CPE_State *s, const double R_meas[3][3], const double R_nois
     }
 
     s->update_count++;
+    return 1;
 }
 
 /* ── Public API ───────────────────────────────────────────────── */
@@ -599,15 +633,22 @@ void CPE_default_cam_params(CPE_CamParams *cam) {
     cam->sigma_px = 1.5;
     cam->min_range = 0.05;
     cam->max_range = 5000.0;
-    /* 3U CubeSat corners in body frame [m] */
-    double corners[8][3] = {
-        { 0.15,  0.15,  0.30}, { 0.15, -0.15,  0.30},
-        {-0.15,  0.15,  0.30}, {-0.15, -0.15,  0.30},
-        { 0.15,  0.15, -0.30}, { 0.15, -0.15, -0.30},
-        {-0.15,  0.15, -0.30}, {-0.15, -0.15, -0.30},
+    /* IS-1002 bus corners plus two solar-wing roots and one dock-face marker. */
+    double corners[CPE_MAX_MODEL_PTS][3] = {
+        { CFG_CHIEF_BODY_HALF_X_M,  CFG_CHIEF_BODY_HALF_Y_M,  CFG_CHIEF_BODY_HALF_Z_M},
+        { CFG_CHIEF_BODY_HALF_X_M, -CFG_CHIEF_BODY_HALF_Y_M,  CFG_CHIEF_BODY_HALF_Z_M},
+        {-CFG_CHIEF_BODY_HALF_X_M,  CFG_CHIEF_BODY_HALF_Y_M,  CFG_CHIEF_BODY_HALF_Z_M},
+        {-CFG_CHIEF_BODY_HALF_X_M, -CFG_CHIEF_BODY_HALF_Y_M,  CFG_CHIEF_BODY_HALF_Z_M},
+        { CFG_CHIEF_BODY_HALF_X_M,  CFG_CHIEF_BODY_HALF_Y_M, -CFG_CHIEF_BODY_HALF_Z_M},
+        { CFG_CHIEF_BODY_HALF_X_M, -CFG_CHIEF_BODY_HALF_Y_M, -CFG_CHIEF_BODY_HALF_Z_M},
+        {-CFG_CHIEF_BODY_HALF_X_M,  CFG_CHIEF_BODY_HALF_Y_M, -CFG_CHIEF_BODY_HALF_Z_M},
+        {-CFG_CHIEF_BODY_HALF_X_M, -CFG_CHIEF_BODY_HALF_Y_M, -CFG_CHIEF_BODY_HALF_Z_M},
+        { 1.50,  0.00,  0.00},
+        {-1.50,  0.00,  0.00},
+        { 0.00,  0.40,  CFG_CHIEF_BODY_HALF_Z_M},
     };
-    for(int i=0;i<8;i++) for(int j=0;j<3;j++) cam->model_pts[i][j]=corners[i][j];
-    cam->n_model_pts = 8;
+    for(int i=0;i<CPE_MAX_MODEL_PTS;i++) for(int j=0;j<3;j++) cam->model_pts[i][j]=corners[i][j];
+    cam->n_model_pts = CPE_MAX_MODEL_PTS;
 }
 
 void CPE_init(CPE_State *s,
@@ -619,6 +660,8 @@ void CPE_init(CPE_State *s,
     memset(s, 0, sizeof(CPE_State));
     s->dt     = dt;
     s->gate_k = gate_k;
+    s->max_reproj_rms_px = 50.0;
+    s->pose_age_s = INFINITY;
     s->cam    = *cam;
 
     /* Random initial quaternion — unknown chief attitude */
@@ -626,10 +669,7 @@ void CPE_init(CPE_State *s,
     s->q[0]=1.0; s->q[1]=s->q[2]=s->q[3]=0.0;
 
     /* P init: 30 deg attitude uncertainty, 5 deg/s omega uncertainty */
-    double sig_att  = 30.0*M_PI/180.0;
-    double sig_omega= 5.0*M_PI/180.0;
-    for(int i=0;i<3;i++) s->P[i][i]=sig_att*sig_att;
-    for(int i=3;i<6;i++) s->P[i][i]=sig_omega*sig_omega;
+    _reset_pose_covariance(s, 30.0, 5.0);
 
     /* Q: small attitude diffusion + omega process noise */
     double sig_q_proc = 0.01*M_PI/180.0 * sqrt(dt);
@@ -653,12 +693,33 @@ CPE_Result CPE_update(CPE_State *s,
                        const double q_chief[4]) {
     /* Predict */
     _predict(s);
+    if (isfinite(s->pose_age_s)) s->pose_age_s += s->dt;
+    _reset_debug(s);
+
+    if (s->pose_age_s > 60.0 && s->update_count >= 10) {
+        double att_floor = (30.0*M_PI/180.0) * (30.0*M_PI/180.0);
+        for(int i=0;i<3;i++) if(s->P[i][i] < att_floor) s->P[i][i] = att_floor;
+    }
 
     /* Range-dependent R gain scheduling — matches Python exactly */
     double true_range = _norm3(dr_lvlh);
+    if (true_range < 2.0) {
+        _q2R(s->q, s->last_R_b2l);
+        s->has_R_b2l = 1;
+        s->status = 3;
+        if (s->update_count >= 10) s->valid = 1;
+
+        CPE_Result res;
+        res.omega[0] = s->omega[0];
+        res.omega[1] = s->omega[1];
+        res.omega[2] = s->omega[2];
+        res.valid    = s->valid;
+        res.status   = s->status;
+        res.pose_age_s = s->pose_age_s;
+        return res;
+    }
     double r_scale;
-    if      (true_range < 2.0)  r_scale = 0.05;
-    else if (true_range < 5.0)  r_scale = 0.05 + 0.25*(true_range-2.0)/3.0;
+    if      (true_range < 5.0)  r_scale = 0.25 + 0.75*(true_range-2.0)/3.0;
     else if (true_range < 20.0) r_scale = 0.5;
     else                         r_scale = 1.0;
 
@@ -670,10 +731,38 @@ CPE_Result CPE_update(CPE_State *s,
     double R_meas[3][3];
     int got_pnp = _estimate_orientation(s, dr_lvlh, q_chief, R_meas);
     if (got_pnp) {
-        for(int i=0;i<3;i++) for(int j=0;j<3;j++)
-            s->last_R_b2l[i][j] = R_meas[i][j];
-        s->has_R_b2l = 1;
-        _update(s, R_meas, R_use);
+        if (isfinite(s->reproj_rms_px) && s->reproj_rms_px > s->max_reproj_rms_px) {
+            s->status = 6;
+        } else if (s->pose_age_s > 10.0 &&
+                   isfinite(s->reproj_rms_px) && s->reproj_rms_px < 10.0) {
+            _R2q(R_meas, s->q);
+            s->omega[0]=s->omega[1]=s->omega[2]=0.0;
+            _reset_pose_covariance(s, 5.0, 3.0);
+            for(int i=0;i<3;i++) for(int j=0;j<3;j++)
+                s->last_R_b2l[i][j] = R_meas[i][j];
+            s->has_R_b2l = 1;
+            s->pose_age_s = 0.0;
+            s->update_count++;
+            s->status = 7;
+        } else if (_update(s, R_meas, R_use)) {
+            for(int i=0;i<3;i++) for(int j=0;j<3;j++)
+                s->last_R_b2l[i][j] = R_meas[i][j];
+            s->has_R_b2l = 1;
+            s->pose_age_s = 0.0;
+            s->status = 1;
+        } else if (isfinite(s->reproj_rms_px) && s->reproj_rms_px < 5.0) {
+            _R2q(R_meas, s->q);
+            s->omega[0]=s->omega[1]=s->omega[2]=0.0;
+            _reset_pose_covariance(s, 5.0, 3.0);
+            for(int i=0;i<3;i++) for(int j=0;j<3;j++)
+                s->last_R_b2l[i][j] = R_meas[i][j];
+            s->has_R_b2l = 1;
+            s->pose_age_s = 0.0;
+            s->update_count++;
+            s->status = 7;
+        } else {
+            s->status = 2;
+        }
     }
 
     if (s->update_count >= 10) s->valid = 1;
@@ -683,5 +772,60 @@ CPE_Result CPE_update(CPE_State *s,
     res.omega[1] = s->omega[1];
     res.omega[2] = s->omega[2];
     res.valid    = s->valid;
+    res.status   = s->status;
+    res.pose_age_s = s->pose_age_s;
+    return res;
+}
+
+CPE_Result CPE_update_rotation(CPE_State *s,
+                                const double R_body2lvlh_meas[3][3],
+                                double range_m) {
+    _predict(s);
+    if (isfinite(s->pose_age_s)) s->pose_age_s += s->dt;
+    _reset_debug(s);
+
+    if (s->pose_age_s > 60.0 && s->update_count >= 10) {
+        double att_floor = (30.0*M_PI/180.0) * (30.0*M_PI/180.0);
+        for(int i=0;i<3;i++) if(s->P[i][i] < att_floor) s->P[i][i] = att_floor;
+    }
+
+    double r = range_m > 0.0 ? range_m : 1e9;
+    double r_scale;
+    if      (r < 2.0)  r_scale = 0.05;
+    else if (r < 5.0)  r_scale = 0.25 + 0.75*(r-2.0)/3.0;
+    else if (r < 20.0) r_scale = 0.5;
+    else               r_scale = 1.0;
+
+    double R_use[3][3];
+    for(int i=0;i<3;i++) for(int j=0;j<3;j++)
+        R_use[i][j] = s->R_meas[i][j] * r_scale;
+
+    int accepted = _update(s, R_body2lvlh_meas, R_use);
+    if (!accepted && s->pose_age_s > 10.0) {
+        _R2q(R_body2lvlh_meas, s->q);
+        s->omega[0]=s->omega[1]=s->omega[2]=0.0;
+        _reset_pose_covariance(s, 5.0, 3.0);
+        accepted = 1;
+        s->status = 7;
+    } else {
+        s->status = accepted ? 1 : 2;
+    }
+
+    if (accepted) {
+        for(int i=0;i<3;i++) for(int j=0;j<3;j++)
+            s->last_R_b2l[i][j] = R_body2lvlh_meas[i][j];
+        s->has_R_b2l = 1;
+        s->pose_age_s = 0.0;
+        s->update_count++;
+    }
+    if (s->update_count >= 10) s->valid = 1;
+
+    CPE_Result res;
+    res.omega[0] = s->omega[0];
+    res.omega[1] = s->omega[1];
+    res.omega[2] = s->omega[2];
+    res.valid = s->valid;
+    res.status = s->status;
+    res.pose_age_s = s->pose_age_s;
     return res;
 }

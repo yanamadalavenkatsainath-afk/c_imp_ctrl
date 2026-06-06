@@ -10,6 +10,7 @@
  */
 
 #include "rpod_ctrl.h"
+#include "capture_gate.h"
 #include <math.h>
 #include <string.h>
 
@@ -44,21 +45,40 @@ static int attitude_gate_ok(const RPOD_TermState *state) {
     return state->attitude_align_deg <= RPOD_DOCK_ALIGN_MAX_DEG;
 }
 
-static double attitude_speed_scale(const RPOD_TermState *state) {
-    if (!state->has_attitude_align) return 1.0;
-    if (state->attitude_align_deg <= 5.0) return 1.0;
-    if (state->attitude_align_deg >= 30.0) return 0.25;
-    return 1.0 - 0.75 * ((state->attitude_align_deg - 5.0) / 25.0);
-}
-
 static int geometry_gate_ok(const RPOD_TermState *state) {
     if (!state->has_geometry) return 1;
     return state->geometry_ok ? 1 : 0;
 }
 
+static int body_clear_ok(const RPOD_TermState *state) {
+    if (!state->has_geometry) return 1;
+    return state->body_clear ? 1 : 0;
+}
+
+static int capture_core_ok(const RPOD_TermState *state, double port_range) {
+    if (state->has_geometry) return state->capture_core ? 1 : 0;
+    return port_range <= RPOD_DOCK_CONE_MIN_RANGE_M;
+}
+
+static void fill_capture_gate(const RPOD_TermState *state,
+                              double port_range,
+                              double port_vrel,
+                              CaptureGateIn *in) {
+    CaptureGate_default(in);
+    in->port_range_m = port_range;
+    in->port_vrel_ms = port_vrel;
+    in->align_deg = state->has_attitude_align ? state->attitude_align_deg : -1.0;
+    in->body_clear = body_clear_ok(state);
+    in->capture_core = capture_core_ok(state, port_range);
+    in->geometry_ok = geometry_gate_ok(state);
+    in->align_ok = attitude_gate_ok(state);
+}
+
 void RPOD_fill_geometry(RPOD_TermState *state) {
     state->has_geometry = 0;
     state->geometry_ok = 1;
+    state->body_clear = 1;
+    state->capture_core = 0;
     state->cone_angle_deg = 0.0;
     state->cone_error_deg = 0.0;
     state->lateral_m = 0.0;
@@ -78,21 +98,80 @@ void RPOD_fill_geometry(RPOD_TermState *state) {
     vec3_scale(axis, 1.0 / axis_n, axis);
 
     double port_to_dep[3];
-    vec3_sub(state->pos, state->port_lvlh, port_to_dep);
+    double axial = 0.0;
+    double lateral = 0.0;
+    int inside_body = 0;
+    int on_dock_face = 1;
+
+    if (state->has_body_R) {
+        double dep_body[3];
+        for (int i = 0; i < 3; ++i) {
+            dep_body[i] = state->R_body_to_lvlh[0][i] * state->pos[0]
+                        + state->R_body_to_lvlh[1][i] * state->pos[1]
+                        + state->R_body_to_lvlh[2][i] * state->pos[2];
+        }
+
+        double axis_body[3] = {
+            CFG_DOCK_AXIS_BODY_X,
+            CFG_DOCK_AXIS_BODY_Y,
+            CFG_DOCK_AXIS_BODY_Z
+        };
+        double axis_body_n = vec3_norm(axis_body);
+        if (axis_body_n < 1e-9) {
+            axis_body[0] = 0.0; axis_body[1] = 0.0; axis_body[2] = 1.0;
+            axis_body_n = 1.0;
+        }
+        vec3_scale(axis_body, 1.0 / axis_body_n, axis_body);
+
+        double port_body[3] = {
+            CFG_DOCK_PORT_BODY_X_M,
+            CFG_DOCK_PORT_BODY_Y_M,
+            CFG_DOCK_PORT_BODY_Z_M
+        };
+        double port_to_dep_body[3];
+        vec3_sub(dep_body, port_body, port_to_dep_body);
+        axial = vec3_dot(port_to_dep_body, axis_body);
+        double lat_body[3] = {
+            port_to_dep_body[0] - axial * axis_body[0],
+            port_to_dep_body[1] - axial * axis_body[1],
+            port_to_dep_body[2] - axial * axis_body[2]
+        };
+        lateral = vec3_norm(lat_body);
+        port_to_dep[0] = port_to_dep_body[0];
+        port_to_dep[1] = port_to_dep_body[1];
+        port_to_dep[2] = port_to_dep_body[2];
+
+        inside_body = (fabs(dep_body[0]) < CFG_CHIEF_BODY_HALF_X_M &&
+                       fabs(dep_body[1]) < CFG_CHIEF_BODY_HALF_Y_M &&
+                       fabs(dep_body[2]) < CFG_CHIEF_BODY_HALF_Z_M);
+        on_dock_face = (dep_body[2] > CFG_CHIEF_BODY_HALF_Z_M - RPOD_DOCK_FACE_TOL_M);
+    } else {
+        vec3_sub(state->pos, state->port_lvlh, port_to_dep);
+        axial = vec3_dot(port_to_dep, axis);
+        double lat_vec[3] = {
+            port_to_dep[0] - axial * axis[0],
+            port_to_dep[1] - axial * axis[1],
+            port_to_dep[2] - axial * axis[2]
+        };
+        lateral = vec3_norm(lat_vec);
+
+        double dep_body_z = CFG_DOCK_PORT_BODY_Z_M + axial;
+        double half_lat = (CFG_CHIEF_BODY_HALF_X_M > CFG_CHIEF_BODY_HALF_Y_M)
+                        ? CFG_CHIEF_BODY_HALF_X_M : CFG_CHIEF_BODY_HALF_Y_M;
+        inside_body = (lateral < half_lat &&
+                       fabs(dep_body_z) < CFG_CHIEF_BODY_HALF_Z_M);
+        on_dock_face = (dep_body_z > CFG_CHIEF_BODY_HALF_Z_M - RPOD_DOCK_FACE_TOL_M);
+    }
+
     double range = vec3_norm(port_to_dep);
     if (range < 1e-9) {
         state->has_geometry = 1;
         state->geometry_ok = 1;
+        state->body_clear = 1;
+        state->capture_core = 1;
         return;
     }
 
-    double axial = vec3_dot(port_to_dep, axis);
-    double lat_vec[3] = {
-        port_to_dep[0] - axial * axis[0],
-        port_to_dep[1] - axial * axis[1],
-        port_to_dep[2] - axial * axis[2]
-    };
-    double lateral = vec3_norm(lat_vec);
     double cosang = axial / range;
     if (cosang > 1.0) cosang = 1.0;
     if (cosang < -1.0) cosang = -1.0;
@@ -101,15 +180,17 @@ void RPOD_fill_geometry(RPOD_TermState *state) {
     double cone_err = angle_deg - RPOD_DOCK_CONE_HALF_ANGLE_DEG;
     int capture_core = (range <= RPOD_DOCK_CONE_MIN_RANGE_M &&
                         lateral <= RPOD_DOCK_PORT_APERTURE_M);
-    int cone_ok = (cone_err <= 0.0) || capture_core;
+    int cone_ok = ((axial > 0.0 && cone_err <= 0.0) || capture_core);
     int aperture_ok = lateral <= RPOD_DOCK_PORT_APERTURE_M;
-    int face_ok = axial >= -RPOD_DOCK_FACE_TOL_M;
+    int body_clear = (!inside_body) || (on_dock_face && aperture_ok);
 
     state->cone_angle_deg = angle_deg;
     state->cone_error_deg = capture_core ? 0.0 : (cone_err > 0.0 ? cone_err : 0.0);
     state->lateral_m = lateral;
     state->has_geometry = 1;
-    state->geometry_ok = (cone_ok && aperture_ok && face_ok) ? 1 : 0;
+    state->body_clear = body_clear ? 1 : 0;
+    state->capture_core = capture_core ? 1 : 0;
+    state->geometry_ok = (body_clear && cone_ok && aperture_ok) ? 1 : 0;
 }
 
 /* ── RPOD_prox_ops ────────────────────────────────────────────── */
@@ -253,15 +334,14 @@ int RPOD_terminal(const RPOD_TermState *state,
     vec3_sub(vel, port_vel, rel_vel);
     double rel_speed = vec3_norm(rel_vel);
 
-    int soft_capture_ready =
-        (tgt_range < RPOD_DOCK_RANGE_M) &&
-        (rel_speed < RPOD_DOCK_MAX_SPEED_MS) &&
-        attitude_gate_ok(state) &&
-        geometry_gate_ok(state);
+    CaptureGateIn cg_in;
+    CaptureGateOut cg_out;
+    fill_capture_gate(state, tgt_range, rel_speed, &cg_in);
+    CaptureGate_eval(&cg_in, &cg_out);
 
     /* ── Speed law (sqrt on com_range) — mirrors Python ─────── */
     /*
-     * K_SQRT_TERM = V_TERM_MAX_MS / sqrt(TERMINAL_M)
+     * K_SQRT_TERM = V_TERM_MAX_MS / sqrt(0.8m)
      * v_des_mag   = min(K_SQRT_TERM * sqrt(max(com_range, 0.001)), V_TERM_MAX_MS)
      * Inside capture: v_des_mag = min(v_des_mag, V_CAPTURE_MS).
      * Keep closing until RPOD_DOCK_DONE_M; do not park at capture entry.
@@ -269,9 +349,6 @@ int RPOD_terminal(const RPOD_TermState *state,
     double rng_eff  = com_range > 0.001 ? com_range : 0.001;
     double v_des_mag = RPOD_K_SQRT_TERM * sqrt(rng_eff);
     if (v_des_mag > RPOD_V_TERM_MAX_MS) v_des_mag = RPOD_V_TERM_MAX_MS;
-    v_des_mag *= attitude_speed_scale(state);
-    if (tgt_range < RPOD_APPROACH_M && v_des_mag > RPOD_V_APPROACH_MS)
-        v_des_mag = RPOD_V_APPROACH_MS;
     if (tgt_range < RPOD_DOCK_RANGE_M && v_des_mag > RPOD_V_CAPTURE_MS)
         v_des_mag = RPOD_V_CAPTURE_MS;
 
@@ -303,7 +380,7 @@ int RPOD_terminal(const RPOD_TermState *state,
     accel_out[1] = accel[1];
     accel_out[2] = accel[2];
 
-    if (soft_capture_ready) return RPOD_RET_SOFT_CAPTURE_READY;
+    if (cg_out.soft_capture_ready) return RPOD_RET_SOFT_CAPTURE_READY;
     return (tgt_range < RPOD_DOCK_RANGE_M) ? RPOD_RET_CAPTURE_ZONE : RPOD_RET_NORMAL;
 }
 
@@ -332,10 +409,14 @@ int RPOD_soft_capture(const RPOD_TermState *state,
     accel_out[2] = RPOD_SOFT_CAPTURE_KP * err[2] - RPOD_SOFT_CAPTURE_KD * rel_vel[2];
     clamp_accel(accel_out, accel_max);
 
-    if (vec3_norm(err) < RPOD_HARD_CAPTURE_RANGE_M &&
-        vec3_norm(rel_vel) < RPOD_HARD_CAPTURE_VREL_MS &&
-        attitude_gate_ok(state) &&
-        geometry_gate_ok(state)) {
+    double port_range = vec3_norm(err);
+    double rel_speed = vec3_norm(rel_vel);
+    CaptureGateIn cg_in;
+    CaptureGateOut cg_out;
+    fill_capture_gate(state, port_range, rel_speed, &cg_in);
+    CaptureGate_eval(&cg_in, &cg_out);
+
+    if (cg_out.hard_capture_ready || cg_out.soft_capture_certified) {
         return RPOD_RET_DOCKED;
     }
     return RPOD_RET_CAPTURE_ZONE;
@@ -430,9 +511,12 @@ int RPOD_terminal_simple(const RPOD_State *state,
     ts.cone_error_deg = 0.0;
     ts.lateral_m = 0.0;
     ts.has_port = 0;
+    ts.has_body_R = 0;
     ts.has_attitude_align = 0;
     ts.has_geometry = 0;
     ts.geometry_ok = 1;
+    ts.body_clear = 1;
+    ts.capture_core = 0;
 
     return RPOD_terminal(&ts, accel_max, accel_out, &_is_braking);
 }

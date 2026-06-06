@@ -77,10 +77,23 @@ class _RPOD_State_C(ctypes.Structure):
 
 class _RPOD_TermState_C(ctypes.Structure):
     _fields_ = [
-        ("pos",       ctypes.c_double * 3),
-        ("vel",       ctypes.c_double * 3),
-        ("port_lvlh", ctypes.c_double * 3),
-        ("has_port",  ctypes.c_int),
+        ("pos",                ctypes.c_double * 3),
+        ("vel",                ctypes.c_double * 3),
+        ("port_lvlh",          ctypes.c_double * 3),
+        ("port_axis_lvlh",     ctypes.c_double * 3),
+        ("port_vel_lvlh",      ctypes.c_double * 3),
+        ("R_body_to_lvlh",     (ctypes.c_double * 3) * 3),
+        ("attitude_align_deg", ctypes.c_double),
+        ("cone_angle_deg",     ctypes.c_double),
+        ("cone_error_deg",     ctypes.c_double),
+        ("lateral_m",          ctypes.c_double),
+        ("has_port",           ctypes.c_int),
+        ("has_body_R",         ctypes.c_int),
+        ("has_attitude_align", ctypes.c_int),
+        ("has_geometry",       ctypes.c_int),
+        ("geometry_ok",        ctypes.c_int),
+        ("body_clear",         ctypes.c_int),
+        ("capture_core",       ctypes.c_int),
     ]
 
 

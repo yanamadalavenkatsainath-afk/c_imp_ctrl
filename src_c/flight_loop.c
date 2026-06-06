@@ -11,6 +11,8 @@
 #include "rpod_ctrl.h"
 #include "terminal_filter.h"
 #include "port_tracker.h"
+#include "chief_pose_estimator.h"
+#include "spin_sync_controller.h"
 #include "sensor_packet.h"
 #include "command_packet.h"
 #include <math.h>
@@ -45,12 +47,267 @@ static double   g_max_loop_ms=0.0;
 static uint32_t g_missed=0;
 static double   g_deadline_ms=10.0;
 static int      g_running=0;
-/* Nadir-pointing reference (identity = body-z toward nadir) */
-static const double g_q_ref[4] = {1.0,0.0,0.0,0.0};
+/* Attitude reference. Identity is the default fine-pointing attitude. */
+static double g_q_ref[4] = {1.0,0.0,0.0,0.0};
+static SpinSyncController g_spin_sync_ctl;
+static double g_spin_sync_omega_body[3] = {0.0,0.0,0.0};
+static double g_spin_sync_prev_axis[3]  = {0.0,0.0,0.0};
+static int    g_spin_sync_has_prev_axis = 0;
+static int    g_spin_sync_active        = 0;
+static int    g_watchdog_mode           = -99;
+static double g_watchdog_phase_start_s  = 0.0;
 
 static double _pointing_err_deg(const double q[4]){
     double qv=sqrt(q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
     return 2.0*asin(qv>1.0?1.0:qv)*180.0/3.14159265358979;
+}
+
+static void _set_q_ref_identity(void){
+    g_q_ref[0]=1.0; g_q_ref[1]=0.0; g_q_ref[2]=0.0; g_q_ref[3]=0.0;
+}
+
+static void _reset_spin_sync(void){
+    g_spin_sync_omega_body[0]=0.0;
+    g_spin_sync_omega_body[1]=0.0;
+    g_spin_sync_omega_body[2]=0.0;
+    SSC_reset(&g_spin_sync_ctl);
+    g_spin_sync_prev_axis[0]=0.0;
+    g_spin_sync_prev_axis[1]=0.0;
+    g_spin_sync_prev_axis[2]=0.0;
+    g_spin_sync_has_prev_axis=0;
+    g_spin_sync_active=0;
+}
+
+static void _quat_rotate_body_to_lvlh(const double q[4],
+                                      const double v_body[3],
+                                      double v_lvlh[3]){
+    double w=q[0], x=q[1], y=q[2], z=q[3];
+    double R00=1.0-2.0*(y*y+z*z), R01=2.0*(x*y-w*z),     R02=2.0*(x*z+w*y);
+    double R10=2.0*(x*y+w*z),     R11=1.0-2.0*(x*x+z*z), R12=2.0*(y*z-w*x);
+    double R20=2.0*(x*z-w*y),     R21=2.0*(y*z+w*x),     R22=1.0-2.0*(x*x+y*y);
+    v_lvlh[0]=R00*v_body[0]+R01*v_body[1]+R02*v_body[2];
+    v_lvlh[1]=R10*v_body[0]+R11*v_body[1]+R12*v_body[2];
+    v_lvlh[2]=R20*v_body[0]+R21*v_body[1]+R22*v_body[2];
+}
+
+static void _quat_rotate_lvlh_to_body(const double q[4],
+                                      const double v_lvlh[3],
+                                      double v_body[3]){
+    double w=q[0], x=q[1], y=q[2], z=q[3];
+    double R00=1.0-2.0*(y*y+z*z), R01=2.0*(x*y-w*z),     R02=2.0*(x*z+w*y);
+    double R10=2.0*(x*y+w*z),     R11=1.0-2.0*(x*x+z*z), R12=2.0*(y*z-w*x);
+    double R20=2.0*(x*z-w*y),     R21=2.0*(y*z+w*x),     R22=1.0-2.0*(x*x+y*y);
+    v_body[0]=R00*v_lvlh[0]+R10*v_lvlh[1]+R20*v_lvlh[2];
+    v_body[1]=R01*v_lvlh[0]+R11*v_lvlh[1]+R21*v_lvlh[2];
+    v_body[2]=R02*v_lvlh[0]+R12*v_lvlh[1]+R22*v_lvlh[2];
+}
+
+static void _update_spin_sync_from_port(const double q_dep_body_to_lvlh[4],
+                                        const double port_lvlh[3],
+                                        const double port_axis_lvlh[3],
+                                        const double port_vel_lvlh[3],
+                                        double dt_s){
+    double axis[3]={port_axis_lvlh[0],port_axis_lvlh[1],port_axis_lvlh[2]};
+    double an=sqrt(axis[0]*axis[0]+axis[1]*axis[1]+axis[2]*axis[2]);
+    if(an < 1e-12 || dt_s <= 0.0){
+        _reset_spin_sync();
+        return;
+    }
+    axis[0]/=an; axis[1]/=an; axis[2]/=an;
+
+    double omega_lvlh[3]={0.0,0.0,0.0};
+    double n_terms=0.0;
+
+    double r2=port_lvlh[0]*port_lvlh[0]+port_lvlh[1]*port_lvlh[1]+port_lvlh[2]*port_lvlh[2];
+    if(r2 > 1e-8){
+        double rv[3]={
+            port_lvlh[1]*port_vel_lvlh[2]-port_lvlh[2]*port_vel_lvlh[1],
+            port_lvlh[2]*port_vel_lvlh[0]-port_lvlh[0]*port_vel_lvlh[2],
+            port_lvlh[0]*port_vel_lvlh[1]-port_lvlh[1]*port_vel_lvlh[0]
+        };
+        omega_lvlh[0]+=rv[0]/r2; omega_lvlh[1]+=rv[1]/r2; omega_lvlh[2]+=rv[2]/r2;
+        n_terms+=1.0;
+    }
+
+    if(g_spin_sync_has_prev_axis){
+        double c[3]={
+            g_spin_sync_prev_axis[1]*axis[2]-g_spin_sync_prev_axis[2]*axis[1],
+            g_spin_sync_prev_axis[2]*axis[0]-g_spin_sync_prev_axis[0]*axis[2],
+            g_spin_sync_prev_axis[0]*axis[1]-g_spin_sync_prev_axis[1]*axis[0]
+        };
+        omega_lvlh[0]+=c[0]/dt_s; omega_lvlh[1]+=c[1]/dt_s; omega_lvlh[2]+=c[2]/dt_s;
+        n_terms+=1.0;
+    }
+
+    g_spin_sync_prev_axis[0]=axis[0];
+    g_spin_sync_prev_axis[1]=axis[1];
+    g_spin_sync_prev_axis[2]=axis[2];
+    g_spin_sync_has_prev_axis=1;
+
+    if(n_terms < 0.5){
+        g_spin_sync_active=0;
+        return;
+    }
+    omega_lvlh[0]/=n_terms; omega_lvlh[1]/=n_terms; omega_lvlh[2]/=n_terms;
+
+    double mag=sqrt(omega_lvlh[0]*omega_lvlh[0]+omega_lvlh[1]*omega_lvlh[1]+omega_lvlh[2]*omega_lvlh[2]);
+    if(mag > CFG_SPIN_SYNC_MAX_OMEGA_RAD_S){
+        _reset_spin_sync();
+        return;
+    }
+    if(mag > CFG_SPIN_SYNC_MAX_RATE_RAD_S){
+        double s=CFG_SPIN_SYNC_MAX_RATE_RAD_S/mag;
+        omega_lvlh[0]*=s; omega_lvlh[1]*=s; omega_lvlh[2]*=s;
+    }
+
+    double omega_body[3];
+    _quat_rotate_lvlh_to_body(q_dep_body_to_lvlh, omega_lvlh, omega_body);
+    SSC_compute_rate_body(&g_spin_sync_ctl, omega_body, g_spin_sync_omega_body);
+    g_spin_sync_active=1;
+}
+
+static void _attctrl_omega_for_control(const double omega_est[3], double omega_out[3]){
+    for(int i=0;i<3;i++){
+        omega_out[i]=omega_est[i] - (g_spin_sync_active ? g_spin_sync_omega_body[i] : 0.0);
+    }
+}
+
+static void _clear_rpod_telem(RPODTelemetry *rt){
+    rt->port_range_m=NAN;
+    rt->port_vrel_ms=NAN;
+    rt->attitude_align_deg=NAN;
+    rt->cone_error_deg=NAN;
+    rt->lateral_m=NAN;
+    rt->phase_elapsed_s=0.0;
+    rt->has_port=0;
+    rt->geometry_ok=0;
+    rt->body_clear=0;
+    rt->capture_core=0;
+    rt->timeout_code=0;
+    rt->pose_age_s=NAN;
+    rt->spin_sync_rate_cmd[0]=0.0;
+    rt->spin_sync_rate_cmd[1]=0.0;
+    rt->spin_sync_rate_cmd[2]=0.0;
+    rt->pose_status=0;
+    rt->pose_valid=0;
+    rt->spin_sync_active=0;
+}
+
+static void _fill_rpod_telem(RPODTelemetry *rt, const RPOD_TermState *ts){
+    rt->has_port=ts->has_port ? 1 : 0;
+    rt->geometry_ok=ts->geometry_ok ? 1 : 0;
+    rt->body_clear=ts->body_clear ? 1 : 0;
+    rt->capture_core=ts->capture_core ? 1 : 0;
+    rt->attitude_align_deg=ts->has_attitude_align ? ts->attitude_align_deg : NAN;
+    rt->cone_error_deg=ts->cone_error_deg;
+    rt->lateral_m=ts->lateral_m;
+    if(ts->has_port){
+        rt->port_range_m=sqrt(ts->port_lvlh[0]*ts->port_lvlh[0]+
+                              ts->port_lvlh[1]*ts->port_lvlh[1]+
+                              ts->port_lvlh[2]*ts->port_lvlh[2]);
+        double dv[3]={ts->vel[0]-ts->port_vel_lvlh[0],
+                      ts->vel[1]-ts->port_vel_lvlh[1],
+                      ts->vel[2]-ts->port_vel_lvlh[2]};
+        rt->port_vrel_ms=sqrt(dv[0]*dv[0]+dv[1]*dv[1]+dv[2]*dv[2]);
+    }else{
+        rt->port_range_m=NAN;
+        rt->port_vrel_ms=NAN;
+    }
+}
+
+static void _reset_rpod_watchdog(void){
+    g_watchdog_mode=-99;
+    g_watchdog_phase_start_s=0.0;
+}
+
+static void _update_rpod_watchdog(double t_sim, int mode, RPODTelemetry *rt){
+    if(mode != g_watchdog_mode){
+        g_watchdog_mode=mode;
+        g_watchdog_phase_start_s=t_sim;
+    }
+    double elapsed=t_sim-g_watchdog_phase_start_s;
+    if(elapsed < 0.0) elapsed=0.0;
+    rt->phase_elapsed_s=elapsed;
+    rt->timeout_code=0;
+    if(mode==10 && elapsed > CFG_PROX_OPS_MAX_S) rt->timeout_code=1;
+    else if(mode==11 && elapsed > CFG_TERMINAL_MAX_S) rt->timeout_code=2;
+    else if(mode==14 && elapsed > CFG_SOFT_CAPTURE_MAX_HOLD_S) rt->timeout_code=3;
+}
+
+static double _dock_alignment_deg(const double q_dep_body_to_lvlh[4],
+                                  const double port_axis_lvlh[3]){
+    double dep_axis_body[3]={
+        CFG_DEP_DOCK_AXIS_BODY_X,
+        CFG_DEP_DOCK_AXIS_BODY_Y,
+        CFG_DEP_DOCK_AXIS_BODY_Z
+    };
+    double dep_axis[3];
+    _quat_rotate_body_to_lvlh(q_dep_body_to_lvlh, dep_axis_body, dep_axis);
+
+    double dep_n=sqrt(dep_axis[0]*dep_axis[0]+dep_axis[1]*dep_axis[1]+dep_axis[2]*dep_axis[2]);
+    double port_n=sqrt(port_axis_lvlh[0]*port_axis_lvlh[0]+port_axis_lvlh[1]*port_axis_lvlh[1]+port_axis_lvlh[2]*port_axis_lvlh[2]);
+    if(dep_n < 1e-12 || port_n < 1e-12) return 180.0;
+
+    double desired[3]={
+        -port_axis_lvlh[0]/port_n,
+        -port_axis_lvlh[1]/port_n,
+        -port_axis_lvlh[2]/port_n
+    };
+    double dot=(dep_axis[0]/dep_n)*desired[0]+
+               (dep_axis[1]/dep_n)*desired[1]+
+               (dep_axis[2]/dep_n)*desired[2];
+    if(dot > 1.0) dot = 1.0;
+    if(dot < -1.0) dot = -1.0;
+    return acos(dot) * 180.0 / 3.14159265358979;
+}
+
+static void _set_q_ref_for_port_axis(const double port_axis_lvlh[3]){
+    double a[3]={
+        CFG_DEP_DOCK_AXIS_BODY_X,
+        CFG_DEP_DOCK_AXIS_BODY_Y,
+        CFG_DEP_DOCK_AXIS_BODY_Z
+    };
+    double b[3]={-port_axis_lvlh[0], -port_axis_lvlh[1], -port_axis_lvlh[2]};
+    double an=sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);
+    double bn=sqrt(b[0]*b[0]+b[1]*b[1]+b[2]*b[2]);
+    if(an < 1e-12 || bn < 1e-12){
+        _set_q_ref_identity();
+        return;
+    }
+    for(int i=0;i<3;i++){ a[i]/=an; b[i]/=bn; }
+
+    double dot=a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+    if(dot > 1.0) dot=1.0;
+    if(dot < -1.0) dot=-1.0;
+
+    double q[4];
+    if(dot < -0.999999){
+        double axis[3] = {1.0, 0.0, 0.0};
+        if(fabs(a[0]) > 0.9){ axis[0]=0.0; axis[1]=1.0; axis[2]=0.0; }
+        double ortho[3]={
+            a[1]*axis[2]-a[2]*axis[1],
+            a[2]*axis[0]-a[0]*axis[2],
+            a[0]*axis[1]-a[1]*axis[0]
+        };
+        double on=sqrt(ortho[0]*ortho[0]+ortho[1]*ortho[1]+ortho[2]*ortho[2]);
+        q[0]=0.0;
+        q[1]=ortho[0]/on; q[2]=ortho[1]/on; q[3]=ortho[2]/on;
+    }else{
+        double c[3]={
+            a[1]*b[2]-a[2]*b[1],
+            a[2]*b[0]-a[0]*b[2],
+            a[0]*b[1]-a[1]*b[0]
+        };
+        q[0]=1.0+dot;
+        q[1]=c[0]; q[2]=c[1]; q[3]=c[2];
+    }
+    double qn=sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
+    if(qn < 1e-12){
+        _set_q_ref_identity();
+        return;
+    }
+    g_q_ref[0]=q[0]/qn; g_q_ref[1]=q[1]/qn;
+    g_q_ref[2]=q[2]/qn; g_q_ref[3]=q[3]/qn;
 }
 
 /*
@@ -69,24 +326,36 @@ static int    g_rpod_mode_hold     = -1;
 static int    g_docked_latched     = 0;
 static int    g_soft_capture_active = 0;
 static double g_hard_capture_hold_s = 0.0;
+static double g_hard_capture_grace_s = 0.0;
 static int    g_terminal_inflated  = 0;
 static TermNavFilter g_terminal_nav;
 static PortTracker   g_port_tracker;
+static CPE_State     g_chief_pose;
 static double                  g_terminal_cam_lost_s = -1.0;
 static int                     g_lost_target_active = 0;
+
+static void _reset_chief_pose_estimator(void){
+    CPE_CamParams cam;
+    CPE_default_cam_params(&cam);
+    CPE_init(&g_chief_pose, &cam, 0.1, 0.001, 3.0, 10.0);
+}
 
 static void _reset_terminal_guidance(void){
     TNF_reset(&g_terminal_nav);
     PT_reset(&g_port_tracker);
+    _reset_spin_sync();
     g_terminal_cam_lost_s = -1.0;
     g_lost_target_active = 0;
     g_soft_capture_active = 0;
     g_hard_capture_hold_s = 0.0;
+    g_hard_capture_grace_s = 0.0;
 }
 
 static void _clear_attitude_holds(void){
     g_dipole_mtq_hold[0]=g_dipole_mtq_hold[1]=g_dipole_mtq_hold[2]=0.0;
     g_torque_rw_hold[0]=g_torque_rw_hold[1]=g_torque_rw_hold[2]=0.0;
+    _set_q_ref_identity();
+    _reset_spin_sync();
 }
 
 /*
@@ -117,7 +386,9 @@ void flight_loop_init(double a_chief_m,double e_chief,double mu,double dt_thekf_
     RW_init(&g_rw);
     MTQ_init(&g_mtq);
     ATTCTRL_init(&g_attctrl);
-    g_tick=0; g_max_loop_ms=0.0; g_missed=0; g_is_braking=-1; g_rpod_mode_hold=-1; g_docked_latched=0; g_terminal_inflated=0; _reset_terminal_guidance();
+    SSC_init(&g_spin_sync_ctl, CFG_SPIN_SYNC_RATE_BLEND, CFG_SPIN_SYNC_MAX_RATE_RAD_S);
+    _reset_chief_pose_estimator();
+    g_tick=0; g_max_loop_ms=0.0; g_missed=0; g_is_braking=-1; g_rpod_mode_hold=-1; g_docked_latched=0; g_terminal_inflated=0; _reset_rpod_watchdog(); _reset_terminal_guidance();
     g_cmd_frame.timing.deadline_ms=g_deadline_ms;
     printf("  flight_loop v2: full ADCS stack enabled\n");
 }
@@ -136,6 +407,7 @@ CommandFrame *flight_loop_step(void){
     SensorFrame  *sf=&g_sensor_frame;
     CommandFrame *cf=&g_cmd_frame;
     double t_sim=(double)g_tick*0.01;
+    _clear_rpod_telem(&cf->rpod);
 
     /* ?????? 100 Hz: Gyro + MEKF predict ???????????????????????????????????????????????????????????????????????????????????? */
     if(sf->gyro.valid){
@@ -231,8 +503,9 @@ CommandFrame *flight_loop_step(void){
             mode=MM_update(&g_mm,t_sim,omega_est,g_rw.h,quest_err,0,cf->att.pointing_err_deg);
         }
         /* PD slew toward reference during sun acq */
-        double trw[3];
-        ATTCTRL_compute(&g_attctrl,cf->att.q_wxyz,omega_est,g_q_ref,trw,NULL);
+        double trw[3], omega_ctrl[3];
+        _attctrl_omega_for_control(omega_est, omega_ctrl);
+        ATTCTRL_compute(&g_attctrl,cf->att.q_wxyz,omega_ctrl,g_q_ref,trw,NULL);
         _apply_rw_clamped(&g_rw,trw,0.01);
         g_torque_rw_hold[0]=trw[0]; g_torque_rw_hold[1]=trw[1]; g_torque_rw_hold[2]=trw[2];
         cf->cmd.torque_rw[0]=g_torque_rw_hold[0]; cf->cmd.torque_rw[1]=g_torque_rw_hold[1]; cf->cmd.torque_rw[2]=g_torque_rw_hold[2];
@@ -240,8 +513,9 @@ CommandFrame *flight_loop_step(void){
         cf->cmd.fsw_mode=2;
 
     }else if(mode==MODE_FINE_POINTING){
-        double trw[3];
-        ATTCTRL_compute(&g_attctrl,cf->att.q_wxyz,omega_est,g_q_ref,trw,NULL);
+        double trw[3], omega_ctrl[3];
+        _attctrl_omega_for_control(omega_est, omega_ctrl);
+        ATTCTRL_compute(&g_attctrl,cf->att.q_wxyz,omega_ctrl,g_q_ref,trw,NULL);
         _apply_rw_clamped(&g_rw,trw,0.01);
         g_torque_rw_hold[0]=trw[0]; g_torque_rw_hold[1]=trw[1]; g_torque_rw_hold[2]=trw[2];
         g_dipole_mtq_hold[0]=g_dipole_mtq_hold[1]=g_dipole_mtq_hold[2]=0.0;
@@ -263,8 +537,9 @@ CommandFrame *flight_loop_step(void){
             MTQ_compute_torque(m,sf->mag.body,tau);
             g_dipole_mtq_hold[0]=m[0]; g_dipole_mtq_hold[1]=m[1]; g_dipole_mtq_hold[2]=m[2];
         }
-        double trw[3];
-        ATTCTRL_compute(&g_attctrl,cf->att.q_wxyz,omega_est,g_q_ref,trw,NULL);
+        double trw[3], omega_ctrl[3];
+        _attctrl_omega_for_control(omega_est, omega_ctrl);
+        ATTCTRL_compute(&g_attctrl,cf->att.q_wxyz,omega_ctrl,g_q_ref,trw,NULL);
         _apply_rw_clamped(&g_rw,trw,0.01);
         g_torque_rw_hold[0]=trw[0]; g_torque_rw_hold[1]=trw[1]; g_torque_rw_hold[2]=trw[2];
         cf->cmd.dipole_mtq[0]=g_dipole_mtq_hold[0]; cf->cmd.dipole_mtq[1]=g_dipole_mtq_hold[1]; cf->cmd.dipole_mtq[2]=g_dipole_mtq_hold[2];
@@ -319,6 +594,7 @@ CommandFrame *flight_loop_step(void){
                 g_rpod_mode_hold=10;
                 g_is_braking=-1;
                 g_terminal_inflated=0;
+                _set_q_ref_identity();
                 _reset_terminal_guidance();
             }else{
                 if(!g_terminal_inflated){
@@ -336,9 +612,12 @@ CommandFrame *flight_loop_step(void){
                 ts.cone_angle_deg=0.0;
                 ts.cone_error_deg=0.0;
                 ts.lateral_m=0.0;
-                ts.has_attitude_align=1;
+                ts.has_attitude_align=0;
+                ts.has_body_R=0;
                 ts.has_geometry=0;
                 ts.geometry_ok=1;
+                ts.body_clear=1;
+                ts.capture_core=0;
                 ts.has_port=PT_update(&g_port_tracker, sf->port.port_lvlh,
                                                   sf->port.valid ? 1 : 0,
                                                   0.1, tracked_port);
@@ -353,16 +632,53 @@ CommandFrame *flight_loop_step(void){
                         ts.port_vel_lvlh[0]=sf->port.port_vel_lvlh[0];
                         ts.port_vel_lvlh[1]=sf->port.port_vel_lvlh[1];
                         ts.port_vel_lvlh[2]=sf->port.port_vel_lvlh[2];
+                        for(int rr=0; rr<3; ++rr){
+                            for(int cc=0; cc<3; ++cc){
+                                ts.R_body_to_lvlh[rr][cc]=sf->port.R_body_to_lvlh[rr][cc];
+                            }
+                        }
+                        CPE_Result cpe = CPE_update_rotation(&g_chief_pose,
+                                                             sf->port.R_body_to_lvlh,
+                                                             cf->nav.range_m);
+                        (void)cpe;
+                        double R_cpe[3][3];
+                        if(CPE_get_R_body2lvlh(&g_chief_pose, R_cpe)){
+                            for(int rr=0; rr<3; ++rr){
+                                for(int cc=0; cc<3; ++cc){
+                                    ts.R_body_to_lvlh[rr][cc]=R_cpe[rr][cc];
+                                }
+                            }
+                        }
+                        ts.has_body_R=1;
+                        ts.attitude_align_deg=_dock_alignment_deg(cf->att.q_wxyz,
+                                                                  ts.port_axis_lvlh);
+                        ts.has_attitude_align=1;
+                        _set_q_ref_for_port_axis(ts.port_axis_lvlh);
+                        _update_spin_sync_from_port(cf->att.q_wxyz,
+                                                    ts.port_lvlh,
+                                                    ts.port_axis_lvlh,
+                                                    ts.port_vel_lvlh,
+                                                    0.1);
                     }else{
                         ts.port_axis_lvlh[0]=0.0; ts.port_axis_lvlh[1]=0.0; ts.port_axis_lvlh[2]=1.0;
                         ts.port_vel_lvlh[0]=0.0; ts.port_vel_lvlh[1]=0.0; ts.port_vel_lvlh[2]=0.0;
+                        _reset_spin_sync();
                     }
                 }else{
                     ts.port_lvlh[0]=0.0; ts.port_lvlh[1]=0.0; ts.port_lvlh[2]=0.0;
                     ts.port_axis_lvlh[0]=0.0; ts.port_axis_lvlh[1]=0.0; ts.port_axis_lvlh[2]=1.0;
                     ts.port_vel_lvlh[0]=0.0; ts.port_vel_lvlh[1]=0.0; ts.port_vel_lvlh[2]=0.0;
+                    _reset_spin_sync();
                 }
                 RPOD_fill_geometry(&ts);
+                _fill_rpod_telem(&cf->rpod, &ts);
+                cf->rpod.pose_age_s = g_chief_pose.pose_age_s;
+                cf->rpod.pose_status = g_chief_pose.status;
+                cf->rpod.pose_valid = g_chief_pose.valid;
+                cf->rpod.spin_sync_active = g_spin_sync_active;
+                cf->rpod.spin_sync_rate_cmd[0] = g_spin_sync_omega_body[0];
+                cf->rpod.spin_sync_rate_cmd[1] = g_spin_sync_omega_body[1];
+                cf->rpod.spin_sync_rate_cmd[2] = g_spin_sync_omega_body[2];
 
                 if(!sf->camera.valid){
                     if(g_terminal_cam_lost_s < 0.0) g_terminal_cam_lost_s = t_sim;
@@ -377,14 +693,26 @@ CommandFrame *flight_loop_step(void){
                 }
 
                 if(g_lost_target_active){
+                    _reset_spin_sync();
                     RPOD_lost_target(&g_rpod_state, ar, new_acc);
                     g_rpod_mode_hold=13;
                 }else{
                     if(g_soft_capture_active){
                         int ret=RPOD_soft_capture(&ts,ar,new_acc);
                         g_rpod_mode_hold=14;
-                        (void)ret;
-                        g_hard_capture_hold_s += 0.1;
+                        if(ret==RPOD_RET_DOCKED){
+                            g_hard_capture_hold_s += 0.1;
+                            g_hard_capture_grace_s = 0.0;
+                        }else if(g_hard_capture_hold_s > 0.0){
+                            g_hard_capture_grace_s += 0.1;
+                            if(g_hard_capture_grace_s > RPOD_HARD_CAPTURE_GRACE_S){
+                                g_hard_capture_hold_s = 0.0;
+                                g_hard_capture_grace_s = 0.0;
+                            }
+                        }else{
+                            g_hard_capture_hold_s = 0.0;
+                            g_hard_capture_grace_s = 0.0;
+                        }
                         if(g_hard_capture_hold_s >= RPOD_HARD_CAPTURE_HOLD_S){
                             g_docked_latched=1;
                             g_rpod_mode_hold=12;
@@ -398,6 +726,7 @@ CommandFrame *flight_loop_step(void){
                         if(ret==RPOD_RET_SOFT_CAPTURE_READY){
                             g_soft_capture_active=1;
                             g_hard_capture_hold_s=0.0;
+                            g_hard_capture_grace_s=0.0;
                             g_is_braking=-1;
                             g_rpod_mode_hold=14;
                         }
@@ -413,6 +742,8 @@ CommandFrame *flight_loop_step(void){
             cf->cmd.accel_lvlh[2]=new_acc[2];
         }
     }
+
+    _update_rpod_watchdog(t_sim, cf->cmd.rpod_mode, &cf->rpod);
 
     /* ?????? Timing ?????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????? */
     double loop_t=_get_time_ms()-t_start;
@@ -441,7 +772,8 @@ void flight_loop_stop(void){g_running=0;}
 void flight_loop_reset(void){
     g_tick=0;g_max_loop_ms=0.0;g_missed=0;g_is_braking=-1;
     g_accel_lvlh_hold[0]=g_accel_lvlh_hold[1]=g_accel_lvlh_hold[2]=0.0;
-    g_rpod_mode_hold=-1; g_docked_latched=0; g_terminal_inflated=0; _reset_terminal_guidance();
+    g_rpod_mode_hold=-1; g_docked_latched=0; g_terminal_inflated=0; _reset_rpod_watchdog(); _reset_terminal_guidance();
+    _reset_chief_pose_estimator();
     _clear_attitude_holds();
     memset(&g_cmd_frame,0,sizeof(g_cmd_frame));
     memset(&g_sensor_frame,0,sizeof(g_sensor_frame));
