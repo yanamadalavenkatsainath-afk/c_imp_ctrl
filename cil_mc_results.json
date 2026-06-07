@@ -1,0 +1,28 @@
+{
+  "envelopes": {
+    "max_total_dv_ms": 3.5,
+    "max_dock_time_s": 12000.0,
+    "max_final_align_deg": 10.0,
+    "max_final_port_range_m": 0.08,
+    "max_final_port_vrel_ms": 0.01,
+    "min_capture_hold_s": 5.0,
+    "max_final_lateral_m": 0.3
+  },
+  "results": [
+    {
+      "seed": 4200,
+      "passed": true,
+      "near_miss": false,
+      "docked": true,
+      "dock_time_s": 4783.0,
+      "total_dv_ms": 1.042822392728143,
+      "final_align_deg": 2.0705307429601176,
+      "final_port_range_m": 0.0,
+      "final_port_vrel_ms": 0.0,
+      "final_lateral_m": 0.030798765844004265,
+      "capture_hold_s": 5.0,
+      "final_rpod_mode": 12,
+      "failure_reason": "-"
+    }
+  ]
+}
